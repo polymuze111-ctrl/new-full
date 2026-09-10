@@ -361,6 +361,24 @@ class RecipeIn(BaseModel):
     active: bool = True
 
 
+class PurchaseOrderLineIn(BaseModel):
+    item_id: str
+    qty: float  # in the item's PURCHASE unit
+    unit_cost: float = 0.0  # HKD per purchase unit
+
+
+class PurchaseOrderIn(BaseModel):
+    supplier: Optional[str] = ""
+    lines: List[PurchaseOrderLineIn] = []
+    expected_date: Optional[str] = None
+    notes: Optional[str] = ""
+
+
+class StocktakeCountIn(BaseModel):
+    item_id: str
+    counted: float  # in the item's usage unit
+
+
 class UpsellNudgeIn(BaseModel):
     """A combo-heat-map hint event — shown when the badge renders, accepted
     when the server taps it, dismissed when the underlying combo fires without

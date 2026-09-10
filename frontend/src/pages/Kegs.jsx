@@ -7,11 +7,12 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 export default function Kegs() {
   const [kegs, setKegs] = useState([]);
   const [products, setProducts] = useState([]);
+  const [invItems, setInvItems] = useState([]);
   const [selKeg, setSelKeg] = useState(null);
 
   const load = useCallback(async () => {
-    const [k, p] = await Promise.all([api.get("/kegs"), api.get("/products")]);
-    setKegs(k.data); setProducts(p.data);
+    const [k, p, i] = await Promise.all([api.get("/kegs"), api.get("/products"), api.get("/inventory/items")]);
+    setKegs(k.data); setProducts(p.data); setInvItems(i.data);
   }, []);
   useEffect(() => {
     load();
@@ -39,8 +40,9 @@ export default function Kegs() {
     const pname = prompt("Beer name (must exist in Menu products)?");
     const p = products.find(x => x.name.toLowerCase() === (pname || "").toLowerCase());
     if (!p) return toast.error("Product not found");
-    await api.post("/kegs", { name, product_id: p.id, size_ml: 30000, ml_per_pour: 568, threshold_pct: 10 });
-    toast.success("Keg added"); load();
+    const linked = invItems.find(i => i.name === `${p.name} Draught`);
+    await api.post("/kegs", { name, product_id: p.id, size_ml: 30000, ml_per_pour: 568, threshold_pct: 10, inventory_item_id: linked?.id || null });
+    toast.success(linked ? `Keg added · linked to ${linked.name}` : "Keg added"); load();
   };
 
   const alerts = kegs.filter(k => k.alert).length;
@@ -84,7 +86,14 @@ export default function Kegs() {
                 {k.alert && <AlertTriangle size={14} className="ml-auto text-[var(--rose)]" />}
                 {isBlown && <span className="ml-auto text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-[var(--rose)] text-white font-black">BLOWN</span>}
               </div>
-              <div className="text-[10px] font-mono uppercase text-[var(--muted)] mt-1">{k.product?.name || "unlinked"}</div>
+              <div className="text-[10px] font-mono uppercase text-[var(--muted)] mt-1">
+                {k.product?.name || "unlinked"}
+                {k.inventory_item_id && (
+                  <span data-testid={`keg-linked-${k.name}`} className="ml-1 px-1 rounded bg-[var(--cyan)]/15 text-[var(--cyan)]">
+                    ⇄ {invItems.find(i => i.id === k.inventory_item_id)?.name || "stock"}
+                  </span>
+                )}
+              </div>
 
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[10px] font-mono">

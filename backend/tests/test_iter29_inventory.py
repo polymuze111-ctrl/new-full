@@ -4,6 +4,7 @@ Covers: units CRUD + duplicate guard, items CRUD, stock adjustments (restock/was
 stocktake), movement ledger, recipes CRUD, auto-deduction on order pay (incl.
 variant multiplier x2), role gating for server user.
 """
+
 import os
 import time
 
@@ -80,7 +81,12 @@ class TestUnits:
     def test_duplicate_seed_ml_rejected(self, admin_h):
         r = requests.post(
             f"{BASE}/api/inventory/units",
-            json={"name": "dup ml", "symbol": "ml", "kind": "volume", "factor_to_base": 1},
+            json={
+                "name": "dup ml",
+                "symbol": "ml",
+                "kind": "volume",
+                "factor_to_base": 1,
+            },
             headers=admin_h,
             timeout=20,
         )
@@ -191,8 +197,12 @@ class TestAdjustments:
         # stocktake absolute 4321
         r3 = requests.post(
             f"{BASE}/api/inventory/items/{iid}/adjust",
-            json={"qty": 0, "reason": "stocktake", "new_stock": 4321,
-                  "note": "TEST count"},
+            json={
+                "qty": 0,
+                "reason": "stocktake",
+                "new_stock": 4321,
+                "note": "TEST count",
+            },
             headers=admin_h,
             timeout=20,
         )
@@ -289,16 +299,15 @@ class TestAutoDeduction:
 
         bourbon_after = _get_item(admin_h, "Bourbon Whiskey")["stock"]
         delta = round(bourbon_before - bourbon_after, 3)
-        assert abs(delta - 50.0) < 0.5, (
-            f"Bourbon delta {delta}ml (expected 50)"
-        )
+        assert abs(delta - 50.0) < 0.5, f"Bourbon delta {delta}ml (expected 50)"
 
         # movement with reason=sale + order_id
         m = requests.get(
             f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20
         ).json()
         bourbon_moves = [
-            x for x in m
+            x
+            for x in m
             if x["item_name"] == "Bourbon Whiskey" and x.get("order_id") == oid
         ]
         assert bourbon_moves, "no sale movement logged for order"
@@ -346,8 +355,12 @@ class TestRoleGating:
     def test_server_cannot_create_unit(self, server_h):
         r = requests.post(
             f"{BASE}/api/inventory/units",
-            json={"name": "TEST srv", "symbol": "test_srv_sym",
-                  "kind": "volume", "factor_to_base": 1},
+            json={
+                "name": "TEST srv",
+                "symbol": "test_srv_sym",
+                "kind": "volume",
+                "factor_to_base": 1,
+            },
             headers=server_h,
             timeout=20,
         )
@@ -360,9 +373,13 @@ class TestRoleGating:
         bottle = next(u for u in units if u["symbol"] == "bottle")["id"]
         r = requests.post(
             f"{BASE}/api/inventory/items",
-            json={"name": "TEST srv item", "purchase_unit_id": bottle,
-                  "usage_unit_id": bottle, "cost_per_purchase_unit": 1,
-                  "opening_stock": 1},
+            json={
+                "name": "TEST srv item",
+                "purchase_unit_id": bottle,
+                "usage_unit_id": bottle,
+                "cost_per_purchase_unit": 1,
+                "opening_stock": 1,
+            },
             headers=server_h,
             timeout=20,
         )

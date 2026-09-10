@@ -2,14 +2,21 @@
 ledger, and pay-time auto-deduction. Stock is always stored in BASE units
 (ml for volume, g for mass, unit for count) so units stay freely editable."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth import make_current_user_dep
 from deps import _oid, db, serialize, sl
-from models import InventoryItemIn, RecipeIn, StockAdjustIn, UnitIn
+from models import (
+    InventoryItemIn,
+    PurchaseOrderIn,
+    RecipeIn,
+    StockAdjustIn,
+    StocktakeCountIn,
+    UnitIn,
+)
 
 get_current_user = make_current_user_dep(lambda: db)
 
@@ -182,7 +189,11 @@ async def adjust_stock(
     else:
         if body.qty == 0:
             raise HTTPException(400, "qty must be non-zero")
-        after = before + _to_base(body.qty, it.get("usage_unit_id"), units)
+        # Normalise sign by reason so API and UI can't disagree
+        qty = abs(body.qty)
+        if body.reason in ("waste", "breakage"):
+            qty = -qty
+        after = before + _to_base(qty, it.get("usage_unit_id"), units)
     after = round(after, 3)
     await db.inventory_items.update_one(
         {"_id": it["_id"]}, {"$set": {"stock_base": after}}
@@ -201,6 +212,7 @@ async def adjust_stock(
         "at": datetime.now(timezone.utc).isoformat(),
     }
     await db.inventory_movements.insert_one(movement)
+    await _sync_86_flag()
     out = _enrich(await db.inventory_items.find_one({"_id": it["_id"]}), units)
     out["movement"] = serialize(movement)
     return out
@@ -357,7 +369,7 @@ async def deduct_inventory_for_order(order: dict):
     if order.get("server_id"):
         try:
             srv = await db.users.find_one({"_id": _oid(order["server_id"])})
-            server_name = (srv or {}).get("name")
+            server_name = srv.get("name") if isinstance(srv, dict) else None
         except Exception:
             server_name = None
     movements = []
@@ -384,3 +396,377 @@ async def deduct_inventory_for_order(order: dict):
             }
         )
     await db.inventory_movements.insert_many(movements)
+    await _sync_86_flag()
+
+
+# ===================== AUTO-86 SYNC =====================
+async def _sync_86_flag():
+    """Auto-86: a product is 86'd when any recipe ingredient (or its direct
+    sell-as-is item) sits at zero stock, and un-86'd once everything is back.
+    Note: this manages is_86d for recipe-linked products only."""
+    recipes = await db.recipes.find({"active": {"$ne": False}}).to_list(500)
+    if not recipes:
+        return
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    for r in recipes:
+        pid = r.get("product_id")
+        if not pid:
+            continue
+        ids = [rl.get("item_id") for rl in r.get("lines", [])]
+        if r.get("direct_item_id"):
+            ids.append(r["direct_item_id"])
+        zero = any(
+            (items.get(i) or {}).get("stock_base", 1) <= 0
+            for i in ids
+            if i and i in items
+        )
+        try:
+            await db.products.update_one(
+                {"_id": _oid(pid)}, {"$set": {"is_86d": bool(zero)}}
+            )
+        except Exception:
+            pass
+
+
+async def adjust_item_base(
+    item_id, delta_base, reason, note="", user=None, order_id=None
+):
+    """Shared stock mutation: apply delta (base units), log a movement, resync 86 flags."""
+    try:
+        it = await db.inventory_items.find_one({"_id": _oid(item_id)})
+    except Exception:
+        return None
+    if not it:
+        return None
+    before = it.get("stock_base", 0.0) or 0.0
+    after = round(before + delta_base, 3)
+    await db.inventory_items.update_one(
+        {"_id": it["_id"]}, {"$set": {"stock_base": after}}
+    )
+    await db.inventory_movements.insert_one(
+        {
+            "item_id": item_id,
+            "item_name": it.get("name"),
+            "reason": reason,
+            "note": note,
+            "delta_base": round(delta_base, 3),
+            "before_base": round(before, 3),
+            "after_base": after,
+            "user_id": (user or {}).get("id"),
+            "user_name": (user or {}).get("name"),
+            "order_id": order_id,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    await _sync_86_flag()
+    return after
+
+
+# ===================== PURCHASE ORDERS (receiving) =====================
+@router.get("/purchase-orders")
+async def list_purchase_orders(user: dict = Depends(get_current_user)):
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    out = []
+    for p in await db.purchase_orders.find().sort("created_at", -1).to_list(200):
+        s = serialize(p)
+        for line in s.get("lines", []):
+            it = items.get(line.get("item_id") or "") or {}
+            line["item_name"] = it.get("name", "?")
+            pu = units.get(str(it.get("purchase_unit_id") or ""))
+            line["unit_symbol"] = (pu or {}).get("symbol")
+        s["total_cost"] = round(
+            sum(
+                line.get("qty", 0) * line.get("unit_cost", 0)
+                for line in s.get("lines", [])
+            ),
+            2,
+        )
+        out.append(s)
+    return out
+
+
+@router.post("/purchase-orders")
+async def create_purchase_order(
+    body: PurchaseOrderIn, user: dict = Depends(get_current_user)
+):
+    _mgr(user)
+    if not body.lines:
+        raise HTTPException(400, "Add at least one line")
+    doc = body.model_dump()
+    doc.update(
+        {
+            "status": "open",
+            "created_by": user.get("name") or user.get("email"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    r = await db.purchase_orders.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return serialize(doc)
+
+
+@router.post("/purchase-orders/{poid}/receive")
+async def receive_purchase_order(poid: str, user: dict = Depends(get_current_user)):
+    """Receiving a PO restocks every line (purchase units → base units) and
+    logs a restock movement per item."""
+    _mgr(user)
+    po = await db.purchase_orders.find_one({"_id": _oid(poid)})
+    if not po:
+        raise HTTPException(404, "Not found")
+    if po.get("status") != "open":
+        raise HTTPException(400, "PO already received or cancelled")
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    tag = f"PO #{str(po['_id'])[-6:]}"
+    for line in po.get("lines", []):
+        it = items.get(line.get("item_id") or "")
+        if not it:
+            continue
+        pu = units.get(str(it.get("purchase_unit_id") or ""))
+        factor = (pu or {}).get("factor_to_base", 1.0)
+        await adjust_item_base(
+            str(it["_id"]),
+            line.get("qty", 0) * factor,
+            "restock",
+            f"{tag} received",
+            user=user,
+        )
+    await db.purchase_orders.update_one(
+        {"_id": po["_id"]},
+        {
+            "$set": {
+                "status": "received",
+                "received_at": datetime.now(timezone.utc).isoformat(),
+                "received_by": user.get("name") or user.get("email"),
+            }
+        },
+    )
+    return serialize(await db.purchase_orders.find_one({"_id": po["_id"]}))
+
+
+@router.post("/purchase-orders/{poid}/cancel")
+async def cancel_purchase_order(poid: str, user: dict = Depends(get_current_user)):
+    _mgr(user)
+    po = await db.purchase_orders.find_one({"_id": _oid(poid)})
+    if not po:
+        raise HTTPException(404, "Not found")
+    if po.get("status") != "open":
+        raise HTTPException(400, "Only open POs can be cancelled")
+    await db.purchase_orders.update_one(
+        {"_id": po["_id"]}, {"$set": {"status": "cancelled"}}
+    )
+    return serialize(await db.purchase_orders.find_one({"_id": po["_id"]}))
+
+
+# ===================== STOCKTAKE SESSIONS =====================
+@router.post("/stocktake/start")
+async def stocktake_start(user: dict = Depends(get_current_user)):
+    _mgr(user)
+    if await db.stocktakes.find_one({"status": "open"}):
+        raise HTTPException(400, "A stocktake session is already open")
+    items = await db.inventory_items.find({"active": {"$ne": False}}).to_list(500)
+    doc = {
+        "status": "open",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_by": user.get("name") or user.get("email"),
+        "expected": {str(i["_id"]): i.get("stock_base", 0.0) or 0.0 for i in items},
+        "counts": {},
+    }
+    r = await db.stocktakes.insert_one(doc)
+    doc["_id"] = r.inserted_id
+    return serialize(doc)
+
+
+@router.get("/stocktake/current")
+async def stocktake_current(user: dict = Depends(get_current_user)):
+    st = await db.stocktakes.find_one({"status": "open"})
+    if not st:
+        return None
+    units = await _units_map()
+    items = (
+        await db.inventory_items.find({"active": {"$ne": False}})
+        .sort("name", 1)
+        .to_list(500)
+    )
+    lines = []
+    for it in items:
+        iid = str(it["_id"])
+        usage = units.get(str(it.get("usage_unit_id") or ""))
+        f = (usage or {}).get("factor_to_base", 1.0)
+        lines.append(
+            {
+                "item_id": iid,
+                "name": it.get("name"),
+                "category": it.get("category"),
+                "unit_symbol": (usage or {}).get("symbol"),
+                "expected": round(st.get("expected", {}).get(iid, 0.0) / f, 3),
+                "counted": st.get("counts", {}).get(iid),
+            }
+        )
+    return {"session": serialize(st), "lines": lines}
+
+
+@router.post("/stocktake/count")
+async def stocktake_count(
+    body: StocktakeCountIn, user: dict = Depends(get_current_user)
+):
+    st = await db.stocktakes.find_one({"status": "open"})
+    if not st:
+        raise HTTPException(400, "No open stocktake session")
+    await db.stocktakes.update_one(
+        {"_id": st["_id"]}, {"$set": {f"counts.{body.item_id}": body.counted}}
+    )
+    return {"ok": True}
+
+
+@router.post("/stocktake/close")
+async def stocktake_close(user: dict = Depends(get_current_user)):
+    """Close the session: counted items are set to the counted value, each
+    correction lands in the movement ledger, and a variance report (with HKD
+    value) is returned and stored on the session."""
+    _mgr(user)
+    st = await db.stocktakes.find_one({"status": "open"})
+    if not st:
+        raise HTTPException(400, "No open stocktake session")
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    report = []
+    for iid, counted in (st.get("counts") or {}).items():
+        it = items.get(iid)
+        if not it:
+            continue
+        usage = units.get(str(it.get("usage_unit_id") or ""))
+        uf = (usage or {}).get("factor_to_base", 1.0)
+        counted_base = round(_to_base(counted, it.get("usage_unit_id"), units), 3)
+        before = it.get("stock_base", 0.0) or 0.0
+        expected_base = st.get("expected", {}).get(iid, before)
+        variance = round(counted_base - expected_base, 3)
+        await db.inventory_items.update_one(
+            {"_id": it["_id"]}, {"$set": {"stock_base": counted_base}}
+        )
+        await db.inventory_movements.insert_one(
+            {
+                "item_id": iid,
+                "item_name": it.get("name"),
+                "reason": "stocktake",
+                "note": "Stocktake session",
+                "delta_base": round(counted_base - before, 3),
+                "before_base": round(before, 3),
+                "after_base": counted_base,
+                "user_id": user["id"],
+                "user_name": user.get("name") or user.get("email"),
+                "order_id": None,
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        pu = units.get(str(it.get("purchase_unit_id") or ""))
+        pf = (pu or {}).get("factor_to_base", 1.0)
+        report.append(
+            {
+                "item_id": iid,
+                "name": it.get("name"),
+                "unit_symbol": (usage or {}).get("symbol"),
+                "expected": round(expected_base / uf, 3),
+                "counted": counted,
+                "variance": round(variance / uf, 3),
+                "variance_value": (
+                    round((variance / pf) * it.get("cost_per_purchase_unit", 0.0), 2)
+                    if pf
+                    else 0.0
+                ),
+            }
+        )
+    report.sort(key=lambda r: -abs(r["variance_value"]))
+    await db.stocktakes.update_one(
+        {"_id": st["_id"]},
+        {
+            "$set": {
+                "status": "closed",
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+                "closed_by": user.get("name") or user.get("email"),
+                "report": report,
+            }
+        },
+    )
+    await _sync_86_flag()
+    return {
+        "report": report,
+        "session": serialize(await db.stocktakes.find_one({"_id": st["_id"]})),
+    }
+
+
+@router.post("/stocktake/cancel")
+async def stocktake_cancel(user: dict = Depends(get_current_user)):
+    _mgr(user)
+    await db.stocktakes.update_many(
+        {"status": "open"}, {"$set": {"status": "cancelled"}}
+    )
+    return {"ok": True}
+
+
+@router.get("/stocktake/history")
+async def stocktake_history(user: dict = Depends(get_current_user)):
+    docs = (
+        await db.stocktakes.find({"status": "closed"}).sort("closed_at", -1).to_list(20)
+    )
+    return sl(docs)
+
+
+# ===================== ANALYTICS =====================
+@router.get("/analytics")
+async def inventory_analytics(days: int = 30, user: dict = Depends(get_current_user)):
+    """Usage velocity, waste cost and days-of-stock per item over N days."""
+    days = max(1, min(days, 90))
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    movs = await db.inventory_movements.find({"at": {"$gte": since}}).to_list(20000)
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    agg: dict = {}
+    for m in movs:
+        a = agg.setdefault(
+            m.get("item_id") or "", {"sold": 0.0, "waste": 0.0, "restock": 0.0}
+        )
+        d = m.get("delta_base", 0.0) or 0.0
+        if m.get("reason") == "sale":
+            a["sold"] += -d
+        elif m.get("reason") in ("waste", "breakage"):
+            a["waste"] += -d
+        elif m.get("reason") == "restock":
+            a["restock"] += d
+    rows = []
+    for iid, it in items.items():
+        a = agg.get(iid, {"sold": 0.0, "waste": 0.0, "restock": 0.0})
+        usage = units.get(str(it.get("usage_unit_id") or ""))
+        uf = (usage or {}).get("factor_to_base", 1.0)
+        pu = units.get(str(it.get("purchase_unit_id") or ""))
+        pf = (pu or {}).get("factor_to_base", 1.0)
+        cost = it.get("cost_per_purchase_unit", 0.0) or 0.0
+        velocity = a["sold"] / days  # base units per day
+        stock_base = it.get("stock_base", 0.0) or 0.0
+        rows.append(
+            {
+                "item_id": iid,
+                "name": it.get("name"),
+                "category": it.get("category"),
+                "unit_symbol": (usage or {}).get("symbol"),
+                "sold": round(a["sold"] / uf, 2),
+                "waste": round(a["waste"] / uf, 2),
+                "restocked": round(a["restock"] / uf, 2),
+                "usage_value": round((a["sold"] / pf) * cost, 2) if pf else 0.0,
+                "waste_value": round((a["waste"] / pf) * cost, 2) if pf else 0.0,
+                "days_of_stock": (
+                    round(stock_base / velocity, 1) if velocity > 0 else None
+                ),
+            }
+        )
+    rows.sort(key=lambda r: -r["usage_value"])
+    return {
+        "days": days,
+        "rows": rows,
+        "totals": {
+            "usage_value": round(sum(r["usage_value"] for r in rows), 2),
+            "waste_value": round(sum(r["waste_value"] for r in rows), 2),
+            "restock_count": sum(1 for m in movs if m.get("reason") == "restock"),
+        },
+    }

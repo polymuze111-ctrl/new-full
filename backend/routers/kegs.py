@@ -1,6 +1,7 @@
 """Kegs router — 35+ tap tracker with volume + low-level alerts + prep-view aggregation."""
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -19,6 +20,7 @@ class KegIn(BaseModel):
     size_ml: int = 30000  # 30L standard HK keg
     ml_per_pour: int = 568  # UK pint
     threshold_pct: float = 10.0
+    inventory_item_id: Optional[str] = None  # links keg volume into inventory stock
 
 
 @router.get("/kegs")
@@ -55,6 +57,16 @@ async def create_keg(body: KegIn, user: dict = Depends(get_current_user)):
     )
     r = await db.kegs.insert_one(doc)
     doc["_id"] = r.inserted_id
+    if doc.get("inventory_item_id"):
+        from routers.inventory import adjust_item_base
+
+        await adjust_item_base(
+            doc["inventory_item_id"],
+            body.size_ml,
+            "restock",
+            f"Keg '{body.name}' installed",
+            user=user,
+        )
     return serialize(doc)
 
 
@@ -80,6 +92,16 @@ async def install_new_keg(kid: str, user: dict = Depends(get_current_user)):
             }
         },
     )
+    if k.get("inventory_item_id"):
+        from routers.inventory import adjust_item_base
+
+        await adjust_item_base(
+            k["inventory_item_id"],
+            k["size_ml"],
+            "restock",
+            f"Keg '{k['name']}' installed",
+            user=user,
+        )
     return serialize(await db.kegs.find_one({"_id": _oid(kid)}))
 
 
@@ -103,6 +125,8 @@ async def decrement_kegs_for_order(order: dict):
     lowest-current_ml keg first so the near-empty tap blows before the backup.
     Every pour is logged to keg_pours for the 7-day velocity analytics."""
     kegs = await db.kegs.find({"status": "on"}).to_list(200)
+    from routers.inventory import adjust_item_base, deduct_inventory_for_order
+
     kegs.sort(key=lambda k: (k.get("current_ml") or 0))
     by_pid: dict = {}
     for k in kegs:
@@ -131,10 +155,16 @@ async def decrement_kegs_for_order(order: dict):
                 "at": now_iso,
             }
         )
+        if k.get("inventory_item_id"):
+            await adjust_item_base(
+                k["inventory_item_id"],
+                -pour,
+                "sale",
+                f"Order #{str(order.get('_id', ''))[-6:]}",
+                order_id=str(order.get("_id")),
+            )
     if pour_docs:
         await db.keg_pours.insert_many(pour_docs)
-    from routers.inventory import deduct_inventory_for_order
-
     await deduct_inventory_for_order(order)
 
 

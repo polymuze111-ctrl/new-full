@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 30 — Inventory v2 (auto-86, purchase orders, stocktake sessions, analytics, keg↔inventory bridge, sign normalisation). Backend: NEW test_iter30_inventory_v2.py — 12/12 pass covering (1) auto-86 flag flips true when Angostura wasted to zero, back to false after restock (2) PO create/list/receive with correct HK$685 total, +1400ml bourbon & +1000ml lime restock movements, second-receive→400, cancel→cancelled, empty-lines→400 (3) stocktake start/current/count/close full flow with variance report, second-open-start→400 (4) analytics rows+totals shape (5) 3 draught items seeded, Tsingtao keg linked, 1× Tsingtao pay deducts exactly 568ml with reason=sale+order_id, keg install +30000ml restock 'installed' (6) sign normalisation: positive qty+waste→subtract, negative qty+restock→add. Full backend regression: 143/143 pass (16 iter29 + 12 iter30 + 115 legacy) on fresh reseeded DB. Frontend: Inventory tabs orders/stocktake/analytics all render, po-modal end-to-end (add 2 lines, submit, receive) works, stocktake session start→count→save→close→variance report→dismiss all work, analytics KPIs an-usage/an-waste/an-restocks + analytics-table visible with data, Kegs page shows keg-linked-⟨name⟩ badges on Tap 01·Tsingtao & Tap 02·Tsingtao(backup). Floorplan and Register pages load clean.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Kegs page — link-badge seed coverage", "issues": ["Only Tsingtao kegs (Tap 01, Tap 02) are linked to inventory items in the seed. Tap 03/04 Craft IPA, Tap 05/06 San Miguel don't get keg-linked badges even though DRAUGHT_ITEMS for Asahi & Moonzen are seeded. Not a bug per the spec (spec only mentions Tap 01/Tap 02), but consider extending KEG_PRODUCT_TO_ITEM or seed kegs so all draught items map to some on-tap keg for full coverage."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter30_inventory_v2.py",
+    "/app/backend/tests/test_iter29_inventory.py",
+    "/app/test_reports/pytest/iter30.xml",
+    "/app/test_reports/pytest/full_fresh.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Sign normalisation in adjust_stock is clean and backward compatible — old iter29 tests that sent signed qtys (e.g. qty=-100 with reason=waste) still pass because abs() then re-sign happens.",
+    "adjust_item_base does NOT apply sign normalisation (it takes a signed delta directly) — this is correct because internal callers (PO receive uses +factor, keg pour uses -pour, keg install uses +size_ml) already provide the correct sign. Just worth documenting in the docstring.",
+    "_sync_86_flag runs on every movement (adjust, sale, PO receive, keg pour, keg install, stocktake close). O(recipes × items) each call — fine at this seed size but could be batched if catalog grows.",
+    "Stocktake close: variance report is sorted by |variance_value| desc — good UX prioritisation.",
+    "Purchase-order .receive uses item's purchase_unit factor to convert qty to base — correct; if an item lacks a purchase_unit_id the line is silently skipped (line 522-524). Consider surfacing that as a warning in the response.",
+    "Close-stocktake UI uses window.confirm(...) — works but blocks e2e drivers that don't auto-accept dialogs. Consider replacing with an in-app modal for consistency with the rest of the app."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter30_inventory_v2.py"],
+  "success_rate": {"backend": "100% (143/143 full suite; 12/12 iter30; 16/16 iter29)", "frontend": "100% for tested flows (POs, stocktake, analytics, keg bridge, Floorplan/Register)"},
+  "test_credentials": "admin polymuze111@gmail.com/admin123",
+  "seed_data_creation": "All TEST_iter30_* records (POs with supplier prefix, stocktake sessions) are ephemeral. Full DB was dropped + reseeded before the full-suite run via pymongo drop_database + supervisorctl restart backend. Bourbon/Lime/Angostura permanent deltas from tests: acceptable for e2e (test suite is self-consistent on fresh DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "For iter30 rerun: (a) set REACT_APP_BACKEND_URL env var — pytest imports it via os.environ; (b) run with -n 0 (serial); (c) reset DB fresh via `python3 -c \"import pymongo, os; c=pymongo.MongoClient('mongodb://localhost:27017'); c.drop_database('test_database')\"` + `sudo supervisorctl restart backend` + sleep 10 before the full suite — otherwise iter10_kegs.test_kegs_list_seeded expects Tap 01 Tsingtao at ~8% and will fail after any keg-install run. iter30 alone doesn't require reset. For UI stocktake close, Playwright must handle `window.confirm` dialog (page.on('dialog', d=>d.accept())).",
+  "rca of the issue": "N/A — all iter30 features work as spec'd."
+}

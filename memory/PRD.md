@@ -14,6 +14,15 @@ Advanced restaurant POS for a Hong Kong bar/restaurant running 11am–6am, 7 day
 - DB: MongoDB `test_database` (env DB_NAME) — collections incl. users, areas, tables, categories, products, orders, members, happy_hours, kegs, keg_pours, combos, vouchers, upsell_nudges, **units, inventory_items, inventory_movements, recipes**
 - Theme: Hong Kong neon cyberpunk dark mode (`#0B0E14` bg, `#00F2FE` cyan, `#FFB800` amber)
 
+## What's Implemented (v24 · Sep 2026 — P0/P1 backlog iteration)
+- **Auto-86**: `_sync_86_flag()` in inventory router — a recipe-linked product is 86'd the moment any ingredient (or direct item) hits zero stock, and un-86'd on restock. Runs after every deduction, adjustment, PO receive and stocktake close. Adjust endpoint normalises qty sign by reason (waste/breakage always subtract).
+- **Purchase orders / receiving**: `purchase_orders` collection + CRUD (`/api/inventory/purchase-orders`), receive flow restocks all lines (purchase→base unit conversion) with PO-referenced restock movements; double-receive blocked; manager-only writes.
+- **Stocktake sessions**: `stocktakes` collection — start (snapshots expected stock), per-item counts (any staff), close applies corrections as stocktake movements + returns variance report with HKD values; cancel + history endpoints.
+- **Inventory analytics** (`/api/inventory/analytics?days=30`): per-item sold/waste/restocked (usage units), usage + waste value in HKD, days-of-stock estimate; totals row.
+- **Keg↔inventory bridge**: kegs get optional `inventory_item_id`; seeded "Tsingtao/Asahi/Moonzen Draught" items (purchase unit keg) mirror on-tap keg volume — pours deduct ml from the item, keg install restocks it. Kegs page shows ⇄ link badge and auto-links "<beer> Draught" on Add Keg.
+- **Frontend**: Inventory page now 8 tabs (Stock, Items, Recipes, Units, Purchases, Stocktake, Analytics, Movements); PO modal, stocktake count grid + variance report, analytics table.
+- **GitHub push**: BLOCKED — no credentials in pod (no gh CLI, no SSH key, no token). Repo remote added as `origin`; needs a GitHub PAT with repo write to push.
+
 ## What's Implemented (v23 · Sep 2026 — Inventory + Code-Checker iteration)
 - **Environment restore**: cloned full repo into this pod; added missing JWT_SECRET + ADMIN_* env vars; login verified (polymuze111@gmail.com / admin123)
 - **Code audit & fixes (one-time)**: autoflake (10 unused imports), isort+black (25 files), E741 `l`→`line` renames (server/kegs/orders), E701 one-liners split, mypy 58→0 errors (serialize Optional, dict annotations, stripe pm guard, loyalty week-parse cleanup)
@@ -32,18 +41,18 @@ See /app/memory/test_credentials.md — admin polymuze111@gmail.com / admin123 (
 
 ## Prioritized Backlog
 ### P0 (next iteration)
-- Auto-86 product when a recipe ingredient hits zero stock
-- Purchase orders / supplier receiving flow (restock currently manual)
-- Push the fixed repo back to GitHub (user action or via git push)
+- Push the fixed repo back to GitHub — BLOCKED on credentials (needs a PAT with repo write; remote `origin` already configured)
+- In-app confirm modal to replace window.confirm in stocktake close (blocks some e2e drivers)
 ### P1
-- Keg↔inventory bridge: keg volume as an inventory item so draught appears in stock value
-- Stocktake sessions (full-count mode with variance report)
-- Inventory reports tab (usage velocity, waste cost, COGS vs revenue)
+- Extend keg↔item links to Asahi/Moonzen taps when those kegs go on-tap (bridge ready, just needs linking)
+- Purchase-order receive warning when a line item lacks a purchase unit (currently skipped silently)
+- Inventory variance trends report (stocktake history comparison)
 ### P2
 - Multi-venue stock transfer, barcode scanning, supplier price history
 - Frontend lint pipeline (eslint) added to code_check.sh
+- Batch _sync_86_flag if recipe catalog grows large
 
 ## Next Tasks
-1. Run testing agent for full E2E validation of inventory flows
-2. User reviews /inventory page UX
-3. P0 backlog items on request
+1. User provides GitHub PAT (or pushes manually) to sync fixed code to bellybeeroperations-png/posrepotry
+2. User reviews Purchases/Stocktake/Analytics tabs UX
+3. P0/P1 items on request
