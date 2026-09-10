@@ -124,13 +124,13 @@ RECIPES = [
 ]
 
 
-async def seed_inventory(db):
+async def seed_inventory(db) -> None:
     await _seed_units(db)
     new_items = await _seed_items_and_recipes(db)
     await _link_kegs(db, new_items)
 
 
-async def _seed_units(db):
+async def _seed_units(db) -> None:
     existing = {u["symbol"] for u in await db.units.find().to_list(200)}
     now = datetime.now(timezone.utc).isoformat()
     docs = [
@@ -150,10 +150,9 @@ async def _seed_units(db):
         await db.units.insert_many(docs)
 
 
-async def _seed_items_and_recipes(db):
-    """Insert missing items; return names of newly created ones."""
-    units = {u["symbol"]: u for u in await db.units.find().to_list(200)}
-    now = datetime.now(timezone.utc).isoformat()
+async def _seed_inventory_items(db, units: dict, now: str) -> tuple:
+    """Insert missing stock items (spirits/grocery/kitchen + draught bridge
+    items). Returns (item_ids_by_name, newly_created_names)."""
     item_ids = {
         i["name"]: str(i["_id"]) for i in await db.inventory_items.find().to_list(500)
     }
@@ -209,7 +208,10 @@ async def _seed_items_and_recipes(db):
         res = await db.inventory_items.insert_many(docs)
         for doc, iid in zip(docs, res.inserted_ids):
             item_ids[doc["name"]] = str(iid)
+    return item_ids, new_names
 
+
+async def _seed_recipes(db, item_ids: dict, units: dict, now: str) -> None:
     prods = {
         p["name"]: p
         async for p in db.products.find({"name": {"$in": [r[0] for r in RECIPES]}})
@@ -237,10 +239,18 @@ async def _seed_items_and_recipes(db):
                 "updated_at": now,
             }
         )
+
+
+async def _seed_items_and_recipes(db) -> set:
+    """Insert missing items; return names of newly created ones."""
+    units = {u["symbol"]: u for u in await db.units.find().to_list(200)}
+    now = datetime.now(timezone.utc).isoformat()
+    item_ids, new_names = await _seed_inventory_items(db, units, now)
+    await _seed_recipes(db, item_ids, units, now)
     return new_names
 
 
-async def _link_kegs(db, new_item_names):
+async def _link_kegs(db, new_item_names) -> None:
     """Point each keg at its draught inventory item (idempotent). Stock sync
     only happens for newly created items so manual adjustments are preserved."""
     prods = {

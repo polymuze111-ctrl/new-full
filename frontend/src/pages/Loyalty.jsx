@@ -6,6 +6,11 @@ import { Trophy, Search, Sparkles, Gift, Ticket, Zap, Star, Award, Crown } from 
 const TIER_ICONS = { Bronze: Award, Silver: Award, Gold: Star, Platinum: Crown };
 const TIER_COLORS = { Bronze: "#C97D2E", Silver: "#94A3B8", Gold: "#FFB800", Platinum: "#A855F7" };
 
+const CHANNEL_LABELS = {
+  whatsapp: "💚 WhatsApp · HK Bar",
+  sms: "📱 SMS · HK Bar",
+};
+
 export default function Loyalty() {
   const [q, setQ] = useState("");
   const [members, setMembers] = useState([]);
@@ -340,7 +345,7 @@ function PushComposer() {
         <div className="h-4 flex justify-center"><div className="w-16 h-1 rounded-full bg-[var(--muted)]/40" /></div>
         <div className="p-3 bg-[var(--surface)] rounded-[14px]">
           <div className="text-[10px] font-mono uppercase text-[var(--muted)] mb-1 flex items-center gap-1">
-            {channel === "whatsapp" ? "💚 WhatsApp · HK Bar" : channel === "sms" ? "📱 SMS · HK Bar" : "✉️ Email · HK Bar"}
+            {CHANNEL_LABELS[channel] || "✉️ Email · HK Bar"}
           </div>
           <div className="p-2 rounded-lg bg-[var(--surface-2)] text-xs leading-snug">
             <b>{title || "Your title here…"}</b>

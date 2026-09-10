@@ -8,13 +8,13 @@ import { QRCode as QRModal } from "@/components/pos/QRCode";
 import PreauthModal from "@/components/pos/PreauthModal";
 import TableCard from "@/components/pos/floorplan/TableCard";
 import { FloorplanKpiBar, StatusLegend, FloorplanSidebar, SportsTicker } from "@/components/pos/floorplan/FloorplanSections";
+import { useTableDrag } from "@/hooks/useTableDrag";
 
 export default function Floorplan() {
   const [areas, setAreas] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [tables, setTables] = useState([]);
   const [editMode, setEditMode] = useState(false);
-  const [drag, setDrag] = useState(null);
   const [activeHH, setActiveHH] = useState([]);
   const [now, setNow] = useState(new Date());
   const [selTable, setSelTable] = useState(null);
@@ -115,30 +115,7 @@ export default function Floorplan() {
     return acc;
   }, {});
 
-  const onDown = (e, t) => {
-    if (!editMode) return;
-    const rect = e.currentTarget.parentElement.getBoundingClientRect();
-    setDrag({ id: t.id, startX: e.clientX, startY: e.clientY, x0: t.x, y0: t.y, rect });
-  };
-  const onMove = (e) => {
-    if (!drag) return;
-    const dx = e.clientX - drag.startX;
-    const dy = e.clientY - drag.startY;
-    setTables((ts) =>
-      ts.map((t) => (t.id === drag.id ? { ...t, x: Math.max(0, drag.x0 + dx), y: Math.max(0, drag.y0 + dy) } : t))
-    );
-  };
-  const onUp = async () => {
-    if (!drag) return;
-    const t = tables.find((x) => x.id === drag.id);
-    setDrag(null);
-    if (!t) return;
-    try {
-      await api.patch(`/tables/${t.id}`, { x: t.x, y: t.y });
-    } catch {
-      toast.error("Failed to save position");
-    }
-  };
+  const { onDown, onMove, onUp } = useTableDrag(editMode, tables, setTables);
 
   const addTable = async () => {
     const name = prompt("Table name / label?");

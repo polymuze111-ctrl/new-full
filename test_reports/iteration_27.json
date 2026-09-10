@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 27 — Third wave of behavior-preserving refactors verified. HIGH-RISK area this round was the seeder split (seed.py MENU_* constants + _seed_menu_categories/_seed_menu_products, seed_inventory.py _seed_inventory_items/_seed_recipes) — verified clean: dropped DB + supervisor restarted backend + reseeded successfully; full pytest suite 143/143 PASS on fresh DB (78.6s, -n 0). FRONTEND (Playwright via public URL, admin login): (1) FLOORPLAN drag persistence via useTableDrag hook VERIFIED — T1 dragged from (173,407) → (270,474), reloaded page, T1 still at (270,474) → PATCH /tables/{id} persisted. Add/edit UI intact. (2) REPORTS /api/reports/summary returns identical shape {total_revenue, net_revenue, delivery_fees, delivery_gross, total_orders, avg_ticket, by_hour, by_category, by_payment, by_staff, by_delivery_platform} — _revenue_aggregates helper preserved contract exactly. Reports UI renders Revenue by Hour bar, Sales by Category donut, Payment Mix, Top Staff Revenue, Loyalty Digest, KPI tiles. (3) DELIVERY: POST /api/delivery/simulate {platform:deliveroo} → 200 with lines populated; subsequent GET /api/orders shows the new order with order_type=delivery, status=open, delivery.platform=deliveroo → ingest_delivery + _delivery_lines/_delivery_doc split preserved. (4) INVENTORY MODALS (Modals.jsx extraction): Adjust modal shows all 5 REASONS via data-testid=reason-{restock,waste,breakage,correction,stocktake} + adjust-qty + adjust-submit; New Item modal exposes item-name, item-category, item-supplier, item-cost, item-par; New Unit modal opens with symbol/kind fields; Recipes tab renders (no top-level 'New Recipe' button — recipe is created per-product, unchanged behavior). (5) RECEIPT / SPLIT PAYMENT: POST /api/orders/{id}/pay with method=split, splits=[cash 50, card 100], tip=20, member_id set → 200 paid; response contains status=paid, tip=20, splits array, member_id preserved → Receipt subcomponents (Header/Lines/Totals/Payment/Footer) receive correct data (tip row, split method rows, member visible). (6) LOGIN + navigation smoke: sidebar renders all sections; no new console errors beyond the pre-existing 2× 401s on /menu load (documented since iter_25) and the known hydration warning about <span> child of <option> (Layout.jsx line 41 — PRE-EXISTING). Overall: refactor is behavior-preserving; no regressions detected across seeders, reports, delivery, inventory modals, receipt/split, or floorplan drag.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Layout.jsx line 41", "issues": ["Hydration warning: <span> cannot be a child of <option>. Pre-existing, not from this refactor wave. Non-blocking but should be cleaned up."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/",
+    "/app/test_reports/pytest/iter27_full.xml"
+  ],
+  "action_items": [
+    "(Non-blocking) Fix <option><span>...</span></option> hydration warning in Layout.jsx around line 41 (pre-existing since prior iterations)."
+  ],
+  "critical_code_review_comments": [
+    "Seeder refactor is the star of this round — MENU_CATEGORIES/MENU_PRODUCTS/MENU_COURSE_MAP module constants + split _seed_menu_categories/_seed_menu_products result in a fresh DB that populates 15 inventory items, full menu (categories, products, HH rules, combos), members, tables, and reseeds cleanly. 143/143 backend tests re-verify all downstream contracts (combo math, HH-lock, loyalty on_payment_earn, kegs, inventory list_recipes/stocktake_close, reports_summary, delivery ingest) — this is strong evidence the seeder split is behavior-identical.",
+    "_revenue_aggregates helper: reports_summary output keys and types match iter_26 exactly (verified by-hour list, by_category list, by_payment list, by_staff list, by_delivery_platform list all present with correct shapes).",
+    "_delivery_lines/_delivery_doc split in orders.py: simulate → ingest → auto-fire path unbroken; delivery order visible in orders list with correct platform tag; KDS auto-fire preserved (order status=open ready for KDS pickup).",
+    "Modals.jsx extraction from Inventory.jsx: all 4 modals mount cleanly with correct data-testids; REASONS constant delivers all 5 reason chips; UnitSelect works inside Item modal (Purchase Unit / Usage Unit dropdowns visible).",
+    "useTableDrag hook: PATCH /tables/{id} on drop persisted position — reload confirms no reset. Clean hook extraction.",
+    "Receipt.jsx subcomponent split (Header/Lines/Totals/Payment/Footer) receives correct props — split payment response payload preserves tip + splits[] + member_id, which are the exact fields the ReceiptPayment/ReceiptTotals components render.",
+    "Frontend production console remains free of app-originated errors (only pre-existing 2× 401 on /menu + Layout <option> hydration warning noted). Zero new console noise from this refactor."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (143/143)", "frontend": "100% for all refactored surfaces verified"},
+  "test_credentials": "polymuze111@gmail.com / admin123 (PIN 9999)",
+  "seed_data_creation": "Full DB drop (drop_database on DB_NAME) + supervisor restart backend + reseed via startup. Fresh DB used for pytest run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Baseline: 143/143 backend re-verified after seeder split (seed.py + seed_inventory.py). Payment endpoint uses 'splits' (not 'payments') as the split-payments field name and requires top-level 'amount' + 'method':'split'. Floorplan uses PATCH /tables/{id} for position persistence (verified in useTableDrag). Delivery simulate → GET /orders shows order_type=delivery with delivery.platform populated (deliveroo/foodpanda/uber). Inventory tab Recipes has no 'New Recipe' top-level button — recipes are managed per-product in the recipe modal launched from a product context; not a regression. Pre-existing non-blocking: 2× 401 on /menu load, Layout <option><span> hydration warning."
+}

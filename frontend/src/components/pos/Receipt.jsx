@@ -4,6 +4,9 @@ import { toast } from "sonner";
 import { openPrintableWindow } from "@/lib/printable";
 import { receiptHtml } from "@/lib/receiptHtml";
 
+const tsLocal = (iso) =>
+  iso ? new Date(iso).toLocaleString("en-HK", { timeZone: "Asia/Hong_Kong", hour12: false }) : "—";
+
 export default function Receipt({ order, memberName, onClose }) {
   const html = () => receiptHtml(order, memberName);
   const doPrint = () => openPrintableWindow(html(), "receipt");
@@ -12,9 +15,6 @@ export default function Receipt({ order, memberName, onClose }) {
     toast.success(memberName ? `Receipt emailed to ${memberName}` : "Receipt queued for email");
   };
 
-  const tsLocal = (iso) =>
-    iso ? new Date(iso).toLocaleString("en-HK", { timeZone: "Asia/Hong_Kong", hour12: false }) : "—";
-
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white text-black rounded-xl w-full max-w-sm max-h-[92vh] overflow-y-auto shadow-2xl relative">
@@ -22,59 +22,11 @@ export default function Receipt({ order, memberName, onClose }) {
           <X size={20} />
         </button>
         <div className="p-6 font-mono text-[13px] leading-relaxed" data-testid="receipt-body">
-          <div className="text-center">
-            <div className="font-black text-xl tracking-widest">HK · BAR</div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-neutral-500">Advanced POS · Hong Kong</div>
-          </div>
-          <div className="border-t border-dashed border-neutral-400 my-3" />
-          <div className="text-[11px] text-neutral-600">
-            Receipt #{order?.id?.slice(-6).toUpperCase()}
-          </div>
-          <div className="text-[11px] text-neutral-600">{tsLocal(order?.closed_at || order?.opened_at)}</div>
-          <div className="text-[11px] text-neutral-600">
-            Type: {order?.order_type} · Guests: {order?.guests}
-          </div>
-          {memberName && (
-            <div className="text-[11px] text-neutral-600">Member: {memberName}</div>
-          )}
-          <div className="border-t border-dashed border-neutral-400 my-3" />
-          {(order?.lines || []).map((l, i) => (
-            <div key={`${l.product_id || "x"}-${l.variant || ""}-${i}`} className="flex justify-between text-[12px]">
-              <div className="flex-1">
-                {l.qty}× {l.name}
-                {l.modifiers?.length > 0 && (
-                  <div className="text-[10px] text-neutral-500 pl-3">+ {l.modifiers.join(", ")}</div>
-                )}
-              </div>
-              <div className="tabular-nums">{fmtHKD(l.price * l.qty)}</div>
-            </div>
-          ))}
-          <div className="border-t border-dashed border-neutral-400 my-3" />
-          <Row label="Subtotal" value={fmtHKD(order?.subtotal || 0)} />
-          {order?.discount > 0 && <Row label="Discount" value={`- ${fmtHKD(order.discount)}`} />}
-          <Row label={`Service (${order?.service_charge_pct || 10}%)`} value={fmtHKD(order?.service_charge || 0)} />
-          <div className="border-t border-neutral-800 my-2" />
-          <div className="flex justify-between font-black text-lg">
-            <span>TOTAL</span>
-            <span>{fmtHKD(order?.total || 0)}</span>
-          </div>
-          {order?.payment && (
-            <>
-              <div className="border-t border-dashed border-neutral-400 my-3" />
-              <Row label={`Paid (${order.payment.method})`} value={fmtHKD(order.payment.amount || 0)} />
-              {order.payment.method === "split" && (order.payment.splits || []).map((s, i) => (
-                <Row key={`${s.method}-${s.amount}-${i}`} label={`  · ${s.method}`} value={fmtHKD(s.amount)} sub />
-              ))}
-              {order.payment.tip > 0 && <Row label="Tip" value={fmtHKD(order.payment.tip)} />}
-              {order.payment.change > 0 && <Row label="Change" value={fmtHKD(order.payment.change)} />}
-            </>
-          )}
-          <div className="border-t border-dashed border-neutral-400 my-3" />
-          <div className="text-center text-[10px] text-neutral-500">
-            THANK YOU · SEE YOU AGAIN
-            <br />
-            {tsLocal(order?.closed_at || new Date().toISOString())}
-          </div>
+          <ReceiptHeader order={order} memberName={memberName} />
+          <ReceiptLines order={order} />
+          <ReceiptTotals order={order} />
+          <ReceiptPayment order={order} />
+          <ReceiptFooter order={order} />
         </div>
         <div className="flex gap-2 p-4 bg-neutral-100 border-t border-neutral-200">
           <button data-testid="receipt-email" onClick={doEmail}
@@ -88,6 +40,93 @@ export default function Receipt({ order, memberName, onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const Dashed = () => <div className="border-t border-dashed border-neutral-400 my-3" />;
+
+function ReceiptHeader({ order, memberName }) {
+  return (
+    <>
+      <div className="text-center">
+        <div className="font-black text-xl tracking-widest">HK · BAR</div>
+        <div className="text-[10px] uppercase tracking-[0.25em] text-neutral-500">Advanced POS · Hong Kong</div>
+      </div>
+      <Dashed />
+      <div className="text-[11px] text-neutral-600">
+        Receipt #{order?.id?.slice(-6).toUpperCase()}
+      </div>
+      <div className="text-[11px] text-neutral-600">{tsLocal(order?.closed_at || order?.opened_at)}</div>
+      <div className="text-[11px] text-neutral-600">
+        Type: {order?.order_type} · Guests: {order?.guests}
+      </div>
+      {memberName && (
+        <div className="text-[11px] text-neutral-600">Member: {memberName}</div>
+      )}
+      <Dashed />
+    </>
+  );
+}
+
+function ReceiptLines({ order }) {
+  return (
+    <>
+      {(order?.lines || []).map((l, i) => (
+        <div key={`${l.product_id || "x"}-${l.variant || ""}-${i}`} className="flex justify-between text-[12px]">
+          <div className="flex-1">
+            {l.qty}× {l.name}
+            {l.modifiers?.length > 0 && (
+              <div className="text-[10px] text-neutral-500 pl-3">+ {l.modifiers.join(", ")}</div>
+            )}
+          </div>
+          <div className="tabular-nums">{fmtHKD(l.price * l.qty)}</div>
+        </div>
+      ))}
+      <Dashed />
+    </>
+  );
+}
+
+function ReceiptTotals({ order }) {
+  return (
+    <>
+      <Row label="Subtotal" value={fmtHKD(order?.subtotal || 0)} />
+      {order?.discount > 0 && <Row label="Discount" value={`- ${fmtHKD(order.discount)}`} />}
+      <Row label={`Service (${order?.service_charge_pct || 10}%)`} value={fmtHKD(order?.service_charge || 0)} />
+      <div className="border-t border-neutral-800 my-2" />
+      <div className="flex justify-between font-black text-lg">
+        <span>TOTAL</span>
+        <span>{fmtHKD(order?.total || 0)}</span>
+      </div>
+    </>
+  );
+}
+
+function ReceiptPayment({ order }) {
+  if (!order?.payment) return null;
+  return (
+    <>
+      <Dashed />
+      <Row label={`Paid (${order.payment.method})`} value={fmtHKD(order.payment.amount || 0)} />
+      {order.payment.method === "split" && (order.payment.splits || []).map((s, i) => (
+        <Row key={`${s.method}-${s.amount}-${i}`} label={`  · ${s.method}`} value={fmtHKD(s.amount)} sub />
+      ))}
+      {order.payment.tip > 0 && <Row label="Tip" value={fmtHKD(order.payment.tip)} />}
+      {order.payment.change > 0 && <Row label="Change" value={fmtHKD(order.payment.change)} />}
+    </>
+  );
+}
+
+function ReceiptFooter({ order }) {
+  return (
+    <>
+      <Dashed />
+      <div className="text-center text-[10px] text-neutral-500">
+        THANK YOU · SEE YOU AGAIN
+        <br />
+        {tsLocal(order?.closed_at || new Date().toISOString())}
+      </div>
+    </>
   );
 }
 

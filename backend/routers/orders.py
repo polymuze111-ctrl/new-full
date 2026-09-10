@@ -576,6 +576,39 @@ def _potential_discount(c: dict, subtotal_hint: float) -> float:
     return c.get("discount_value", 0)
 
 
+def _tipping_hint_for_combo(
+    c: dict, line_qtys: dict, hh_locked: set, prods: dict, sub_now: float
+):
+    """First product for which adding ONE more unit would make combo `c`
+    match. Returns the hint dict or None."""
+    if _combo_matches(c, line_qtys):
+        return None  # already applied — skip
+    for pid in _combo_involved_pids(c):
+        if pid in hh_locked or pid not in prods:
+            continue
+        trial = dict(line_qtys)
+        trial[pid] = trial.get(pid, 0) + 1
+        if not _combo_matches(c, trial):
+            continue
+        p = prods[pid]
+        price = p.get("price", 0) or 0
+        d = _potential_discount(c, sub_now + price)
+        return {
+            "combo_id": str(c["_id"]),
+            "combo_name": c.get("name"),
+            "product_id": pid,
+            "product_name": p.get("name"),
+            "product_price": price,
+            "discount": round(d, 2),
+            "discount_type": c.get("discount_type"),
+            "discount_value": c.get("discount_value"),
+            "net_gain": round(
+                d - price, 2
+            ),  # positive if the discount beats the extra product's cost
+        }
+    return None
+
+
 def _table_combo_hints(o: dict, combos: list, prods: dict) -> list:
     """Active combos where adding ONE more unit of a product would tip this
     order into matching. Best hint per combo, sorted by net gain, top 3."""
@@ -589,36 +622,11 @@ def _table_combo_hints(o: dict, combos: list, prods: dict) -> list:
             line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
 
     sub_now = sum(line["price"] * line["qty"] for line in o["lines"])
-    hints = []
-    for c in combos:
-        if _combo_matches(c, line_qtys):
-            continue  # already applied — skip
-        for pid in _combo_involved_pids(c):
-            if pid in hh_locked or pid not in prods:
-                continue
-            trial = dict(line_qtys)
-            trial[pid] = trial.get(pid, 0) + 1
-            if not _combo_matches(c, trial):
-                continue
-            p = prods[pid]
-            price = p.get("price", 0) or 0
-            d = _potential_discount(c, sub_now + price)
-            hints.append(
-                {
-                    "combo_id": str(c["_id"]),
-                    "combo_name": c.get("name"),
-                    "product_id": pid,
-                    "product_name": p.get("name"),
-                    "product_price": price,
-                    "discount": round(d, 2),
-                    "discount_type": c.get("discount_type"),
-                    "discount_value": c.get("discount_value"),
-                    "net_gain": round(
-                        d - price, 2
-                    ),  # positive if the discount beats the extra product's cost
-                }
-            )
-            break  # 1 hint per combo is enough
+    hints = [
+        h
+        for c in combos
+        if (h := _tipping_hint_for_combo(c, line_qtys, hh_locked, prods, sub_now))
+    ]
     hints.sort(key=lambda h: -h["net_gain"])
     return hints[:3]
 
@@ -766,19 +774,8 @@ async def complete_preauth(
     return {"ok": True, "card_last4": card.last4, "brand": card.brand}
 
 
-@router.post("/delivery/ingest")
-async def ingest_delivery(
-    body: DeliveryIngestIn, user: dict = Depends(get_current_user)
-):
-    """MOCKED — accepts a delivery-platform webhook payload and turns it into
-    an auto-fired KDS order. Real webhooks would sign requests; here we trust
-    authenticated staff / a demo simulator."""
-    ids = [_oid(i.product_id) for i in body.items]
-    prods = {
-        str(p["_id"]): p
-        for p in await db.products.find({"_id": {"$in": ids}}).to_list(500)
-    }
-    now = datetime.now(timezone.utc).isoformat()
+def _delivery_lines(body: DeliveryIngestIn, prods: dict, now: str) -> list:
+    """Map webhook items to order lines (auto-fired so KDS sees it instantly)."""
     lines = []
     for item in body.items:
         p = prods.get(item.product_id)
@@ -800,13 +797,13 @@ async def ingest_delivery(
                 "fired_at": now,  # auto-fire so it lands on KDS instantly
             }
         )
-    if not lines:
-        raise HTTPException(400, "No valid products in payload")
-    combos = await _active_combos()
-    totals = _compute_totals(
-        lines, "none", 0.0, 0.0, combos
-    )  # no service charge for delivery
-    doc = {
+    return lines
+
+
+def _delivery_doc(
+    body: DeliveryIngestIn, lines: list, totals: dict, user: dict, now: str
+) -> dict:
+    return {
         "order_type": "delivery",
         "table_id": None,
         "area_id": None,
@@ -831,6 +828,29 @@ async def ingest_delivery(
         "opened_at": now,
         "closed_at": None,
     }
+
+
+@router.post("/delivery/ingest")
+async def ingest_delivery(
+    body: DeliveryIngestIn, user: dict = Depends(get_current_user)
+):
+    """MOCKED — accepts a delivery-platform webhook payload and turns it into
+    an auto-fired KDS order. Real webhooks would sign requests; here we trust
+    authenticated staff / a demo simulator."""
+    ids = [_oid(i.product_id) for i in body.items]
+    prods = {
+        str(p["_id"]): p
+        for p in await db.products.find({"_id": {"$in": ids}}).to_list(500)
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    lines = _delivery_lines(body, prods, now)
+    if not lines:
+        raise HTTPException(400, "No valid products in payload")
+    combos = await _active_combos()
+    totals = _compute_totals(
+        lines, "none", 0.0, 0.0, combos
+    )  # no service charge for delivery
+    doc = _delivery_doc(body, lines, totals, user, now)
     r = await db.orders.insert_one(doc)
     doc["_id"] = r.inserted_id
     return serialize(doc)

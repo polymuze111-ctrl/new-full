@@ -7,6 +7,18 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 const TOOLTIP_STYLE = { background: "#121824", border: "1px solid #26334D" };
 const DOT_STYLE = { fill: "#00F2FE", r: 4 };
 
+function kegBarColor(pct, threshold) {
+  if (pct <= threshold) return "#F43F5E";
+  if (pct < 30) return "#FFB800";
+  return "#10B981";
+}
+
+function kegCardCls(k) {
+  if (k.status === "blown") return "border-[var(--muted)]/30 bg-[var(--surface)] opacity-70";
+  if (k.alert) return "border-[var(--rose)] bg-[var(--rose)]/5 animate-pulse";
+  return "border-[var(--border)] bg-[var(--surface)]";
+}
+
 export default function Kegs() {
   const [kegs, setKegs] = useState([]);
   const [products, setProducts] = useState([]);
@@ -72,16 +84,13 @@ export default function Kegs() {
       <div className="grid grid-cols-3 gap-3">
         {kegs.map(k => {
           const pct = k.pct_remaining || 0;
-          const barColor = pct <= k.threshold_pct ? "#F43F5E" : pct < 30 ? "#FFB800" : "#10B981";
+          const barColor = kegBarColor(pct, k.threshold_pct);
           const isBlown = k.status === "blown";
           return (
             <div
               key={k.id}
               data-testid={`keg-${k.name}`}
-              className={`p-4 rounded-xl border ${
-                isBlown ? "border-[var(--muted)]/30 bg-[var(--surface)] opacity-70"
-                        : k.alert ? "border-[var(--rose)] bg-[var(--rose)]/5 animate-pulse" : "border-[var(--border)] bg-[var(--surface)]"
-              }`}
+              className={`p-4 rounded-xl border ${kegCardCls(k)}`}
             >
               <div className="flex items-center gap-2">
                 <Beer size={16} className="text-[var(--amber)]" />

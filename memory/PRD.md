@@ -10,6 +10,13 @@ Advanced restaurant POS for a Hong Kong bar/restaurant running 11am–6am, 7 day
 - Theme: Hong Kong neon cyberpunk dark mode (`#0B0E14` bg, `#00F2FE` cyan, `#FFB800` amber)
 - Code checker: `bash /app/scripts/code_check.sh` — flake8 + isort + black + mypy + pytest (serial, fresh DB reseed). `--fix` for auto-format.
 
+## What's Implemented (v27 · Sep 2026 — Code-quality report #3 fixes)
+- **Backend refactors**: `reports_summary` (23→ +`_revenue_aggregates`), `_table_combo_hints` (16→ +`_tipping_hint_for_combo`), `ingest_delivery` (66 lines→ +`_delivery_lines`/`_delivery_doc`), `_seed_menu` (274 lines→ MENU_* module constants + `_seed_menu_categories`/`_seed_menu_products`), `_seed_items_and_recipes` (→ `_seed_inventory_items`/`_seed_recipes`); type hints added across both seed modules.
+- **Frontend splits**: Receipt.jsx → ReceiptHeader/ReceiptLines/ReceiptTotals/ReceiptPayment/ReceiptFooter; PreauthModal → `useStripeHold` hook; Inventory.jsx → all 4 modals + REASONS + UnitSelect extracted to `components/inventory/Modals.jsx` (page 597→363 lines); Floorplan drag logic → `src/hooks/useTableDrag.js`.
+- **Nested ternaries**: CartTicket `lineCardCls`, Loyalty `CHANNEL_LABELS` map, Kegs `kegBarColor`/`kegCardCls`. **Perf**: Inventory `activeProducts` useMemo.
+- **Verified false positives (third report)**: 51 hook-dep flags target module-level imports/callback params; all 18 `is` flags are correct `is None`; the 2 "empty catch" blocks are intentional non-blocking catches with comments (console logging was removed by report #2's own demand); 5 "undefined variables" — flake8 clean, none exist.
+- Verified: ALL CHECKS PASSED (143/143 incl. reseeded DB — validates seed refactors), 6-page screenshot sweep clean.
+
 ## What's Implemented (v26 · Sep 2026 — Code-quality report #2 fixes)
 - **Backend complexity refactors** (behavior-preserving, suite-verified): orders.py `_combo_matches`→+`_slot_matches`, `_compute_totals`→+`_hh_locked_pids`/`_combo_qty_map`/`_combo_potential`/`_apply_combos`/`_order_level_discount`, `combo_hints`→+`_table_combo_hints`, `pay_order`→+`_build_payment`/`_apply_member_loyalty`; inventory.py `list_recipes`→+`_enrich_recipe`/`_recipe_line_view`, `stocktake_close`→+`_apply_stocktake_count`; kegs.py `_aggregate_prep`→+`_prep_entry`; loyalty.py `_hh_points_boost`→+`_any_hh_window_active`, `_visit_streak_bonus`→+`_is_consecutive_week`, `send_weekly_digest`→+`_weekly_digest_body`.
 - **Real bug fixed**: ComboEditor slot handlers used stale `slots` closures → converted to functional setState in new `useComboSlots` hook (toggling products no longer risks clobbering other slots).

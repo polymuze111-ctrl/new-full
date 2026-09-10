@@ -7,23 +7,10 @@ import { api } from "@/lib/api";
 
 const CARD_ELEMENT_OPTIONS = { style: { base: { color: "#FFF", "::placeholder": { color: "#94A3B8" } } } };
 
-export default function PreauthModal({ table, onClose, onOpened }) {
-  const [name, setName] = useState("");
-  const [last4, setLast4] = useState("");
-  const [hold, setHold] = useState(500);
-  const [size, setSize] = useState(table?.seats || 2);
+/** Stripe card-hold flow: SetupIntent creation + busy/intent state. */
+function useStripeHold(name, hold) {
   const [busy, setBusy] = useState(false);
   const [stripe, setStripe] = useState({ intent: null, promise: null });
-
-  const canOpen = name.trim() && /^\d{4}$/.test(last4);
-  const elementsOptions = useMemo(
-    () => ({ clientSecret: stripe.intent?.client_secret }),
-    [stripe.intent?.client_secret]
-  );
-  let holdLabel = "Create Card Hold";
-  if (busy) holdLabel = "Creating…";
-  if (stripe.intent) holdLabel = "Hold Created ✓";
-
   const createStripeHold = async () => {
     setBusy(true);
     try {
@@ -39,6 +26,24 @@ export default function PreauthModal({ table, onClose, onOpened }) {
     } catch { toast.error("SetupIntent failed"); }
     finally { setBusy(false); }
   };
+  return { stripe, busy, setBusy, createStripeHold };
+}
+
+export default function PreauthModal({ table, onClose, onOpened }) {
+  const [name, setName] = useState("");
+  const [last4, setLast4] = useState("");
+  const [hold, setHold] = useState(500);
+  const [size, setSize] = useState(table?.seats || 2);
+  const { stripe, busy, setBusy, createStripeHold } = useStripeHold(name, hold);
+
+  const canOpen = name.trim() && /^\d{4}$/.test(last4);
+  const elementsOptions = useMemo(
+    () => ({ clientSecret: stripe.intent?.client_secret }),
+    [stripe.intent?.client_secret]
+  );
+  let holdLabel = "Create Card Hold";
+  if (busy) holdLabel = "Creating…";
+  if (stripe.intent) holdLabel = "Hold Created ✓";
 
   const submit = async () => {
     setBusy(true);

@@ -425,7 +425,51 @@ async def delete_staff(uid: str, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
-# ===================== REPORTS =====================
+async def _revenue_aggregates(paid: list, cats: dict, prods: dict, staff: dict) -> dict:
+    """Fold paid orders into the five report buckets (hour/category/payment/
+    staff/delivery-platform)."""
+    by_hour: dict = {}
+    by_cat: dict = {}
+    by_pay: dict = {}
+    by_staff: dict = {}
+    by_platform: dict = {}
+    for o in paid:
+        # hour
+        try:
+            h = datetime.fromisoformat(o["closed_at"]).astimezone(timezone.utc).hour
+        except Exception:
+            h = 0
+        by_hour[h] = by_hour.get(h, 0) + o.get("total", 0)
+        # category
+        for line in o.get("lines", []):
+            p = prods.get(line["product_id"])
+            if p:
+                cn = cats.get(p["category_id"], "Other")
+                by_cat[cn] = by_cat.get(cn, 0) + line["price"] * line["qty"]
+        # payment
+        pay = (o.get("payment") or {}).get("method", "cash")
+        by_pay[pay] = by_pay.get(pay, 0) + o.get("total", 0)
+        # staff
+        sname = staff.get(o.get("server_id"), "—")
+        by_staff[sname] = by_staff.get(sname, 0) + o.get("total", 0)
+        # delivery platform breakdown (gross + fee + net)
+        if o.get("order_type") == "delivery":
+            d = o.get("delivery") or {}
+            row = by_platform.setdefault(
+                d.get("platform", "unknown"), {"gross": 0, "fee": 0, "orders": 0}
+            )
+            row["gross"] += o.get("total", 0)
+            row["fee"] += d.get("fee", 0) or 0
+            row["orders"] += 1
+    return {
+        "by_hour": by_hour,
+        "by_cat": by_cat,
+        "by_pay": by_pay,
+        "by_staff": by_staff,
+        "by_platform": by_platform,
+    }
+
+
 @api.get("/reports/summary")
 async def reports_summary(user: dict = Depends(get_current_user)):
     paid = await db.orders.find({"status": "paid"}).to_list(2000)
@@ -444,47 +488,14 @@ async def reports_summary(user: dict = Depends(get_current_user)):
     )
     net_revenue = round(total_revenue - delivery_fees, 2)
 
-    by_hour: dict = {}
-    by_cat: dict = {}
-    by_pay: dict = {}
-    by_staff: dict = {}
-    by_platform: dict = {}
     cats = {str(c["_id"]): c["name"] for c in await db.categories.find().to_list(500)}
     prods = {str(p["_id"]): p for p in await db.products.find().to_list(2000)}
     staff = {str(u["_id"]): u.get("name") for u in await db.users.find().to_list(200)}
+    agg = await _revenue_aggregates(paid, cats, prods, staff)
 
-    for o in paid:
-        # hour
-        try:
-            h = datetime.fromisoformat(o["closed_at"]).astimezone(timezone.utc).hour
-        except Exception:
-            h = 0
-        by_hour[h] = by_hour.get(h, 0) + o.get("total", 0)
-        # category
-        for line in o.get("lines", []):
-            p = prods.get(line["product_id"])
-            if p:
-                cn = cats.get(p["category_id"], "Other")
-                by_cat[cn] = by_cat.get(cn, 0) + line["price"] * line["qty"]
-        # payment
-        pay = (o.get("payment") or {}).get("method", "cash")
-        by_pay[pay] = by_pay.get(pay, 0) + o.get("total", 0)
-        # staff
-        sid = o.get("server_id")
-        sname = staff.get(sid, "—")
-        by_staff[sname] = by_staff.get(sname, 0) + o.get("total", 0)
-        # delivery platform breakdown (gross + fee + net)
-        if o.get("order_type") == "delivery":
-            d = o.get("delivery") or {}
-            plt = d.get("platform", "unknown")
-            row = by_platform.setdefault(plt, {"gross": 0, "fee": 0, "orders": 0})
-            row["gross"] += o.get("total", 0)
-            row["fee"] += d.get("fee", 0) or 0
-            row["orders"] += 1
-
-    hour_items = sorted(by_hour.items())
-    cat_items = sorted(by_cat.items(), key=lambda x: -x[1])
-    staff_items = sorted(by_staff.items(), key=lambda x: -x[1])
+    hour_items = sorted(agg["by_hour"].items())
+    cat_items = sorted(agg["by_cat"].items(), key=lambda x: -x[1])
+    staff_items = sorted(agg["by_staff"].items(), key=lambda x: -x[1])
     return {
         "total_revenue": round(total_revenue, 2),
         "net_revenue": net_revenue,
@@ -494,7 +505,9 @@ async def reports_summary(user: dict = Depends(get_current_user)):
         "avg_ticket": round(avg_ticket, 2),
         "by_hour": [{"hour": hour, "revenue": round(v, 2)} for hour, v in hour_items],
         "by_category": [{"name": k, "revenue": round(v, 2)} for k, v in cat_items],
-        "by_payment": [{"name": k, "revenue": round(v, 2)} for k, v in by_pay.items()],
+        "by_payment": [
+            {"name": k, "revenue": round(v, 2)} for k, v in agg["by_pay"].items()
+        ],
         "by_staff": [{"name": k, "revenue": round(v, 2)} for k, v in staff_items],
         "by_delivery_platform": [
             {
@@ -504,7 +517,7 @@ async def reports_summary(user: dict = Depends(get_current_user)):
                 "net": round(v["gross"] - v["fee"], 2),
                 "orders": v["orders"],
             }
-            for k, v in by_platform.items()
+            for k, v in agg["by_platform"].items()
         ],
     }
 

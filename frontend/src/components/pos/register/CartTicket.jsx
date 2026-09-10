@@ -13,6 +13,13 @@ const ORDER_TYPES = [
   ["delivery", Truck, "Delivery"],
 ];
 
+function lineCardCls(l, hhLocked, comboLocked) {
+  if (l.held) return "border-dashed border-[var(--amber)] bg-[var(--amber)]/5";
+  if (comboLocked) return "border-[var(--cyan)]/60 bg-[var(--cyan)]/5";
+  if (hhLocked) return "border-[var(--amber)]/50 bg-[var(--amber)]/5";
+  return "border-[var(--border)] bg-[var(--surface-2)]";
+}
+
 export default function CartTicket({
   order, setOrder, totals, activeHH, combos,
   onSave, onPay, onRepeat, onRemoveLine, onFireCourse,
@@ -155,12 +162,7 @@ function TicketLines({ order, setOrder, onRemove, totals }) {
         return (
         <div key={`${l.product_id}-${l.variant || ""}-${i}`}
           data-testid={`cart-line-${i}`}
-          className={`p-2 rounded-lg border ${
-            l.held ? "border-dashed border-[var(--amber)] bg-[var(--amber)]/5" :
-            comboLocked ? "border-[var(--cyan)]/60 bg-[var(--cyan)]/5" :
-            hhLocked ? "border-[var(--amber)]/50 bg-[var(--amber)]/5" :
-            "border-[var(--border)] bg-[var(--surface-2)]"
-          }`}>
+          className={`p-2 rounded-lg border ${lineCardCls(l, hhLocked, comboLocked)}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
               <div className="font-semibold text-sm text-white flex items-center gap-1.5">
