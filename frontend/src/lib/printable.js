@@ -8,7 +8,7 @@ export function openPrintableWindow(html, name = "print") {
   if (w) {
     const doPrint = () => setTimeout(() => {
       try { w.focus(); w.print(); }
-      catch (err) { console.warn("[printable] print blocked:", err); }
+      catch { /* print blocked (popup cancelled) */ }
     }, 400);
     // Load event fires for blob URLs
     w.addEventListener("load", doPrint, { once: true });

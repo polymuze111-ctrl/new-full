@@ -20,6 +20,9 @@ export default function PreauthModal({ table, onClose, onOpened }) {
     () => ({ clientSecret: stripe.intent?.client_secret }),
     [stripe.intent?.client_secret]
   );
+  let holdLabel = "Create Card Hold";
+  if (busy) holdLabel = "Creating…";
+  if (stripe.intent) holdLabel = "Hold Created ✓";
 
   const createStripeHold = async () => {
     setBusy(true);
@@ -33,7 +36,7 @@ export default function PreauthModal({ table, onClose, onOpened }) {
         promise: loadStripe(r.data.publishable_key, { stripeAccount: undefined }),
       });
       toast.success("Card form ready — enter card below");
-    } catch (e) { console.error(e); toast.error("SetupIntent failed"); }
+    } catch { toast.error("SetupIntent failed"); }
     finally { setBusy(false); }
   };
 
@@ -110,7 +113,7 @@ export default function PreauthModal({ table, onClose, onOpened }) {
           <button onClick={onClose} className="px-4 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">Cancel</button>
           <button data-testid="preauth-stripe" onClick={createStripeHold} disabled={busy || !name.trim() || !!stripe.intent}
             className="flex-1 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--cyan)] text-[var(--cyan)] disabled:opacity-40">
-            {stripe.intent ? "Hold Created ✓" : (busy ? "Creating…" : "Create Card Hold")}
+            {holdLabel}
           </button>
           <button data-testid="preauth-open" onClick={submit} disabled={!canOpen || busy}
             className="flex-1 btn-neon py-2.5 rounded-lg disabled:opacity-40">

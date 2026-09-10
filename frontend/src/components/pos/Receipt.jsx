@@ -2,6 +2,7 @@ import { fmtHKD } from "@/lib/api";
 import { X, Printer, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { openPrintableWindow } from "@/lib/printable";
+import { receiptHtml } from "@/lib/receiptHtml";
 
 export default function Receipt({ order, memberName, onClose }) {
   const html = () => receiptHtml(order, memberName);
@@ -97,49 +98,3 @@ const Row = ({ label, value, sub }) => (
   </div>
 );
 
-function receiptHtml(order, memberName) {
-  const ts = (iso) => iso ? new Date(iso).toLocaleString("en-HK", { timeZone: "Asia/Hong_Kong" }) : "";
-  const rows = (order.lines || []).map(l => `
-    <tr><td>${l.qty}× ${escapeHtml(l.name)}${l.modifiers?.length ? `<br><span class="s">+ ${escapeHtml(l.modifiers.join(", "))}</span>` : ""}</td>
-    <td class="r">HK$ ${(l.price * l.qty).toFixed(2)}</td></tr>`).join("");
-  const splits = order.payment?.method === "split" && order.payment.splits
-    ? order.payment.splits.map(s => `<tr><td class="s">&nbsp;· ${s.method}</td><td class="r s">HK$ ${(s.amount || 0).toFixed(2)}</td></tr>`).join("") : "";
-  return `<!doctype html><html><head><meta charset="utf-8"/><title>Receipt</title>
-<style>body{font-family:'JetBrains Mono',monospace;font-size:12px;width:280px;margin:0;padding:12px;color:#000}
-h1{font-size:20px;text-align:center;margin:0;letter-spacing:.15em}
-h2{font-size:10px;text-align:center;margin:0 0 10px;letter-spacing:.25em;color:#666}
-hr{border:0;border-top:1px dashed #000;margin:6px 0}
-.r{text-align:right}
-.s{color:#666;font-size:10px}
-.big{font-size:15px;font-weight:900}
-table{width:100%;border-collapse:collapse}
-td{padding:2px 0;vertical-align:top}
-.center{text-align:center}
-@page{size:auto;margin:4mm}
-</style></head><body>
-<h1>HK · BAR</h1><h2>ADVANCED POS · HONG KONG</h2>
-<div class="s">Receipt #${(order.id || "").slice(-6).toUpperCase()}</div>
-<div class="s">${ts(order.closed_at || order.opened_at)}</div>
-<div class="s">Type: ${order.order_type} · Guests: ${order.guests}</div>
-${memberName ? `<div class="s">Member: ${escapeHtml(memberName)}</div>` : ""}
-<hr/>
-<table>${rows}</table>
-<hr/>
-<table>
-<tr><td>Subtotal</td><td class="r">HK$ ${(order.subtotal || 0).toFixed(2)}</td></tr>
-${order.discount > 0 ? `<tr><td>Discount</td><td class="r">- HK$ ${order.discount.toFixed(2)}</td></tr>` : ""}
-<tr><td>Service (${order.service_charge_pct || 10}%)</td><td class="r">HK$ ${(order.service_charge || 0).toFixed(2)}</td></tr>
-</table>
-<hr/>
-<table><tr><td class="big">TOTAL</td><td class="big r">HK$ ${(order.total || 0).toFixed(2)}</td></tr></table>
-${order.payment ? `<hr/><table>
-<tr><td>Paid (${order.payment.method})</td><td class="r">HK$ ${(order.payment.amount || 0).toFixed(2)}</td></tr>
-${splits}
-${order.payment.tip > 0 ? `<tr><td>Tip</td><td class="r">HK$ ${order.payment.tip.toFixed(2)}</td></tr>` : ""}
-${order.payment.change > 0 ? `<tr><td>Change</td><td class="r">HK$ ${order.payment.change.toFixed(2)}</td></tr>` : ""}
-</table>` : ""}
-<hr/>
-<div class="center s">THANK YOU · SEE YOU AGAIN</div>
-</body></html>`;
-}
-function escapeHtml(s) { return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }

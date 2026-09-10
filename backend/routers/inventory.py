@@ -257,43 +257,30 @@ async def inventory_summary(user: dict = Depends(get_current_user)):
     }
 
 
-# ===================== RECIPES =====================
+def _recipe_line_view(line: dict, items: dict, units: dict) -> dict:
+    it = items.get(str(line.get("item_id") or "")) or {}
+    unit = units.get(str(line.get("unit_id") or it.get("usage_unit_id") or "")) or {}
+    return {**line, "item_name": it.get("name", "?"), "unit_symbol": unit.get("symbol")}
+
+
+def _enrich_recipe(r: dict, prods: dict, items: dict, units: dict) -> dict:
+    s = serialize(r)
+    p = prods.get(r.get("product_id") or "")
+    s["product_name"] = p.get("name") if p else "—"
+    s["product_variants"] = [v.get("name") for v in (p or {}).get("variants", [])]
+    direct = items.get(str(r.get("direct_item_id") or ""))
+    s["direct_item_name"] = direct.get("name") if direct else None
+    s["lines"] = [_recipe_line_view(line, items, units) for line in r.get("lines", [])]
+    return s
+
+
 @router.get("/recipes")
 async def list_recipes(user: dict = Depends(get_current_user)):
     units = await _units_map()
     items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
     prods = {str(p["_id"]): p for p in await db.products.find().to_list(2000)}
-    out = []
-    for r in await db.recipes.find().sort("product_id", 1).to_list(500):
-        s = serialize(r)
-        p = prods.get(r.get("product_id") or "")
-        s["product_name"] = p.get("name") if p else "—"
-        s["product_variants"] = [v.get("name") for v in (p or {}).get("variants", [])]
-        direct = items.get(str(r.get("direct_item_id") or ""))
-        s["direct_item_name"] = direct.get("name") if direct else None
-        s["lines"] = [
-            {
-                **line,
-                "item_name": (items.get(str(line.get("item_id") or "")) or {}).get(
-                    "name", "?"
-                ),
-                "unit_symbol": (
-                    units.get(
-                        str(
-                            line.get("unit_id")
-                            or (items.get(str(line.get("item_id") or "")) or {}).get(
-                                "usage_unit_id"
-                            )
-                            or ""
-                        )
-                    )
-                    or {}
-                ).get("symbol"),
-            }
-            for line in r.get("lines", [])
-        ]
-        out.append(s)
-    return out
+    recipes = await db.recipes.find().sort("product_id", 1).to_list(500)
+    return [_enrich_recipe(r, prods, items, units) for r in recipes]
 
 
 @router.get("/recipes/by-product/{pid}")
@@ -632,6 +619,53 @@ async def stocktake_count(
     return {"ok": True}
 
 
+async def _apply_stocktake_count(
+    st: dict, it: dict, counted: float, units: dict, user: dict
+) -> dict:
+    """Set one item to its counted value, log the stocktake movement, and
+    return the variance report line."""
+    iid = str(it["_id"])
+    usage = units.get(str(it.get("usage_unit_id") or ""))
+    uf = (usage or {}).get("factor_to_base", 1.0)
+    counted_base = round(_to_base(counted, it.get("usage_unit_id"), units), 3)
+    before = it.get("stock_base", 0.0) or 0.0
+    expected_base = st.get("expected", {}).get(iid, before)
+    variance = round(counted_base - expected_base, 3)
+    await db.inventory_items.update_one(
+        {"_id": it["_id"]}, {"$set": {"stock_base": counted_base}}
+    )
+    await db.inventory_movements.insert_one(
+        {
+            "item_id": iid,
+            "item_name": it.get("name"),
+            "reason": "stocktake",
+            "note": "Stocktake session",
+            "delta_base": round(counted_base - before, 3),
+            "before_base": round(before, 3),
+            "after_base": counted_base,
+            "user_id": user["id"],
+            "user_name": user.get("name") or user.get("email"),
+            "order_id": None,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    pu = units.get(str(it.get("purchase_unit_id") or ""))
+    pf = (pu or {}).get("factor_to_base", 1.0)
+    return {
+        "item_id": iid,
+        "name": it.get("name"),
+        "unit_symbol": (usage or {}).get("symbol"),
+        "expected": round(expected_base / uf, 3),
+        "counted": counted,
+        "variance": round(variance / uf, 3),
+        "variance_value": (
+            round((variance / pf) * it.get("cost_per_purchase_unit", 0.0), 2)
+            if pf
+            else 0.0
+        ),
+    }
+
+
 @router.post("/stocktake/close")
 async def stocktake_close(user: dict = Depends(get_current_user)):
     """Close the session: counted items are set to the counted value, each
@@ -646,49 +680,8 @@ async def stocktake_close(user: dict = Depends(get_current_user)):
     report = []
     for iid, counted in (st.get("counts") or {}).items():
         it = items.get(iid)
-        if not it:
-            continue
-        usage = units.get(str(it.get("usage_unit_id") or ""))
-        uf = (usage or {}).get("factor_to_base", 1.0)
-        counted_base = round(_to_base(counted, it.get("usage_unit_id"), units), 3)
-        before = it.get("stock_base", 0.0) or 0.0
-        expected_base = st.get("expected", {}).get(iid, before)
-        variance = round(counted_base - expected_base, 3)
-        await db.inventory_items.update_one(
-            {"_id": it["_id"]}, {"$set": {"stock_base": counted_base}}
-        )
-        await db.inventory_movements.insert_one(
-            {
-                "item_id": iid,
-                "item_name": it.get("name"),
-                "reason": "stocktake",
-                "note": "Stocktake session",
-                "delta_base": round(counted_base - before, 3),
-                "before_base": round(before, 3),
-                "after_base": counted_base,
-                "user_id": user["id"],
-                "user_name": user.get("name") or user.get("email"),
-                "order_id": None,
-                "at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        pu = units.get(str(it.get("purchase_unit_id") or ""))
-        pf = (pu or {}).get("factor_to_base", 1.0)
-        report.append(
-            {
-                "item_id": iid,
-                "name": it.get("name"),
-                "unit_symbol": (usage or {}).get("symbol"),
-                "expected": round(expected_base / uf, 3),
-                "counted": counted,
-                "variance": round(variance / uf, 3),
-                "variance_value": (
-                    round((variance / pf) * it.get("cost_per_purchase_unit", 0.0), 2)
-                    if pf
-                    else 0.0
-                ),
-            }
-        )
+        if it:
+            report.append(await _apply_stocktake_count(st, it, counted, units, user))
     report.sort(key=lambda r: -abs(r["variance_value"]))
     await db.stocktakes.update_one(
         {"_id": st["_id"]},

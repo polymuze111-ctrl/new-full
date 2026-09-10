@@ -3,6 +3,43 @@ import { api, fmtHKD } from "@/lib/api";
 import { toast } from "sonner";
 import { ClipboardCheck } from "lucide-react";
 
+function varianceColor(v) {
+  if (v < 0) return "#F43F5E";
+  if (v > 0) return "#10B981";
+  return "#94A3B8";
+}
+
+function StocktakeReport({ report, onDismiss }) {
+  return (
+    <div data-testid="stocktake-report">
+      <div className="flex items-center gap-3 mb-3">
+        <h3 className="font-display font-bold text-lg">Variance report</h3>
+        <button data-testid="btn-dismiss-report" onClick={onDismiss} className="ml-auto py-1.5 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)]">Dismiss</button>
+      </div>
+      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
+            <tr><th className="text-left px-4 py-2">Item</th><th className="text-right px-4 py-2">Expected</th><th className="text-right px-4 py-2">Counted</th><th className="text-right px-4 py-2">Variance</th><th className="text-right px-4 py-2">Value</th></tr>
+          </thead>
+          <tbody>
+            {report.map((r) => (
+              <tr key={r.item_id} data-testid={`variance-${r.name}`} className="border-t border-[var(--border)]">
+                <td className="px-4 py-2 font-semibold text-white">{r.name}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs">{r.expected} {r.unit_symbol}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs">{r.counted} {r.unit_symbol}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: varianceColor(r.variance) }}>
+                  {r.variance > 0 ? "+" : ""}{r.variance} {r.unit_symbol}
+                </td>
+                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: varianceColor(r.variance_value) }}>{fmtHKD(r.variance_value)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function StocktakeTab({ stocktake, onChanged }) {
   const [counts, setCounts] = useState({});
   const [report, setReport] = useState(null);
@@ -31,34 +68,7 @@ export function StocktakeTab({ stocktake, onChanged }) {
     await api.post("/inventory/stocktake/cancel"); onChanged();
   };
 
-  if (report) return (
-    <div data-testid="stocktake-report">
-      <div className="flex items-center gap-3 mb-3">
-        <h3 className="font-display font-bold text-lg">Variance report</h3>
-        <button data-testid="btn-dismiss-report" onClick={() => setReport(null)} className="ml-auto py-1.5 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)]">Dismiss</button>
-      </div>
-      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
-            <tr><th className="text-left px-4 py-2">Item</th><th className="text-right px-4 py-2">Expected</th><th className="text-right px-4 py-2">Counted</th><th className="text-right px-4 py-2">Variance</th><th className="text-right px-4 py-2">Value</th></tr>
-          </thead>
-          <tbody>
-            {report.map((r) => (
-              <tr key={r.item_id} data-testid={`variance-${r.name}`} className="border-t border-[var(--border)]">
-                <td className="px-4 py-2 font-semibold text-white">{r.name}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{r.expected} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{r.counted} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.variance < 0 ? "#F43F5E" : r.variance > 0 ? "#10B981" : "#94A3B8" }}>
-                  {r.variance > 0 ? "+" : ""}{r.variance} {r.unit_symbol}
-                </td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.variance_value < 0 ? "#F43F5E" : "#10B981" }}>{fmtHKD(r.variance_value)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  if (report) return <StocktakeReport report={report} onDismiss={() => setReport(null)} />;
 
   if (!session) return (
     <div className="p-10 rounded-xl border border-dashed border-[var(--border)] text-center">

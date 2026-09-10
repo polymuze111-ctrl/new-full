@@ -392,14 +392,11 @@ async def _maybe_birthday_voucher(member_doc: dict, new_tier: dict, awards: list
             awards.append({"kind": "voucher", "title": v["title"], "voucher": v})
 
 
-async def _hh_points_boost(member_doc: dict, base_pts: int, awards: list):
-    # --- Happy-Hour points boost (2× base points during any active window) ---
-    active_hh = await db.happy_hours.find({"active": True}).to_list(50)
-    if not active_hh:
-        return
+def _any_hh_window_active(active_hh: list) -> bool:
+    """True when the current HK time falls inside any active HH window
+    (day-filtered, overnight windows supported)."""
     now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
     cur = now.strftime("%H:%M")
-    in_window = False
     for h in active_hh:
         s, e = h.get("start_time"), h.get("end_time")
         days = h.get("days") or []
@@ -408,9 +405,16 @@ async def _hh_points_boost(member_doc: dict, base_pts: int, awards: list):
         if not s or not e:
             continue
         if (s <= e and s <= cur <= e) or (s > e and (cur >= s or cur <= e)):
-            in_window = True
-            break
-    if in_window and base_pts > 0:
+            return True
+    return False
+
+
+async def _hh_points_boost(member_doc: dict, base_pts: int, awards: list):
+    # --- Happy-Hour points boost (2× base points during any active window) ---
+    active_hh = await db.happy_hours.find({"active": True}).to_list(50)
+    if not active_hh:
+        return
+    if _any_hh_window_active(active_hh) and base_pts > 0:
         await db.members.update_one(
             {"_id": member_doc["_id"]}, {"$inc": {"points": base_pts}}
         )
@@ -423,6 +427,21 @@ async def _hh_points_boost(member_doc: dict, base_pts: int, awards: list):
         )
 
 
+def _is_consecutive_week(last_wk, iso_year: int, iso_week: int) -> bool:
+    """last_wk (YYYY-Www) is the week directly before (iso_year, iso_week),
+    handling the year boundary at week 52/53."""
+    try:
+        ly = int((last_wk or "").split("-W")[0])
+        lw = int((last_wk or "").split("-W")[1])
+    except Exception:
+        return False
+    if not ly or not lw:
+        return False
+    return (ly == iso_year and lw + 1 == iso_week) or (
+        ly == iso_year - 1 and iso_week == 1 and lw in (52, 53)
+    )
+
+
 async def _visit_streak_bonus(member_doc: dict, awards: list):
     # --- Visit-streak bonus (consecutive ISO weeks) ---
     now_hk = datetime.now(ZoneInfo("Asia/Hong_Kong"))
@@ -432,19 +451,7 @@ async def _visit_streak_bonus(member_doc: dict, awards: list):
     streak = member_doc.get("streak_weeks", 0) or 0
     if last_wk == key:
         return  # same week, no change
-    # Was last week consecutive?
-    try:
-        ly = int((last_wk or "").split("-W")[0])
-        lw = int((last_wk or "").split("-W")[1])
-    except Exception:
-        ly, lw = None, None
-    consecutive = False
-    if ly and lw:
-        # Simple: same year & lw+1==iso_week; OR crossing year boundary at week 52/53→1
-        consecutive = (ly == iso_year and lw + 1 == iso_week) or (
-            ly == iso_year - 1 and iso_week == 1 and lw in (52, 53)
-        )
-    streak = streak + 1 if consecutive else 1
+    streak = streak + 1 if _is_consecutive_week(last_wk, iso_year, iso_week) else 1
     await db.members.update_one(
         {"_id": member_doc["_id"]},
         {"$set": {"last_visit_week": key, "streak_weeks": streak}},
@@ -826,13 +833,8 @@ async def push_campaigns(limit: int = 50, user: dict = Depends(get_current_user)
     return out[:limit]
 
 
-@router.post("/digest/send-weekly")
-async def send_weekly_digest(user: dict = Depends(get_current_user)):
-    """Sends a Monday-morning digest to every manager/admin.
-    Best-effort: uses Twilio WhatsApp when creds are present, otherwise logs to
-    push_log with status=MOCKED. Intended to be called from .emergent/crons.yml."""
-    if user["role"] not in ("admin", "manager", "system"):
-        raise HTTPException(403, "Manager or scheduled system only")
+async def _weekly_digest_body() -> str:
+    """Build the digest text from the last 7 days of loyalty data."""
     from datetime import timedelta as _td
 
     week_ago = (datetime.now(timezone.utc) - _td(days=7)).isoformat()
@@ -852,13 +854,23 @@ async def send_weekly_digest(user: dict = Depends(get_current_user)):
         miss_counts[k] = miss_counts.get(k, 0) + 1
     top_misses = sorted(miss_counts.items(), key=lambda x: -x[1])[:3]
 
-    body = (
+    return (
         f"HK Bar · Weekly Digest\n"
         f"• {signups} new sign-ups\n"
         f"• {v_issued} vouchers issued · {v_redeemed} redeemed\n"
         f"• {scratch} scratch cards claimed\n"
         f"• Top missed combos: " + (", ".join(f"{n}×{c}" for n, c in top_misses) or "—")
     )
+
+
+@router.post("/digest/send-weekly")
+async def send_weekly_digest(user: dict = Depends(get_current_user)):
+    """Sends a Monday-morning digest to every manager/admin.
+    Best-effort: uses Twilio WhatsApp when creds are present, otherwise logs to
+    push_log with status=MOCKED. Intended to be called from .emergent/crons.yml."""
+    if user["role"] not in ("admin", "manager", "system"):
+        raise HTTPException(403, "Manager or scheduled system only")
+    body = await _weekly_digest_body()
     recipients = await db.users.find({"role": {"$in": ["admin", "manager"]}}).to_list(
         50
     )

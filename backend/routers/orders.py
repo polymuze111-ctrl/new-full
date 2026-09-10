@@ -42,6 +42,20 @@ router = APIRouter(prefix="/api", tags=["orders"])
 
 
 # ---------- Exclusivity engine ----------
+def _slot_matches(slot: dict, line_qtys: dict) -> bool:
+    """One combo slot satisfied by line_qtys={pid: qty}."""
+    pids = slot.get("product_ids") or []
+    if not pids:
+        return False
+    counts = {pid: line_qtys.get(pid, 0) for pid in pids}
+    min_q = slot.get("min_qty", 1) or 1
+    max_q = slot.get("max_qty", 99) or 99
+    if slot.get("operator", "or") == "and":
+        return all(1 <= c_ <= max_q for c_ in counts.values())
+    total = sum(counts.values())
+    return min_q <= total <= max_q
+
+
 def _combo_matches(c, line_qtys):
     """Slots satisfied by line_qtys={pid: qty}. Callers must zero out any pid
     already locked by a higher-priority promotion (HH or an earlier combo)."""
@@ -49,23 +63,7 @@ def _combo_matches(c, line_qtys):
     if not slots:
         required = set(c.get("product_ids") or [])
         return bool(required) and all(line_qtys.get(pid, 0) >= 1 for pid in required)
-    for slot in slots:
-        pids = slot.get("product_ids") or []
-        if not pids:
-            return False
-        counts = {pid: line_qtys.get(pid, 0) for pid in pids}
-        total = sum(counts.values())
-        min_q = slot.get("min_qty", 1) or 1
-        max_q = slot.get("max_qty", 99) or 99
-        if slot.get("operator", "or") == "and":
-            if not all(c_ >= 1 for c_ in counts.values()):
-                return False
-            if any(c_ > max_q for c_ in counts.values()):
-                return False
-        else:
-            if total < min_q or total > max_q:
-                return False
-    return True
+    return all(_slot_matches(slot, line_qtys) for slot in slots)
 
 
 def _combo_involved_pids(c):
@@ -77,78 +75,98 @@ def _combo_involved_pids(c):
     return set(c.get("product_ids") or [])
 
 
-def _compute_totals(
-    lines, discount_type, discount_value, service_charge_pct, combos=None
-):
-    """See module docstring for the exclusivity rule."""
-    subtotal = sum(line["price"] * line["qty"] for line in lines)
-    discount = 0.0
-    combo_discount = 0.0
-    combos_applied = []
-
-    # 1) HH lock — any line whose register already applied happy-hour pricing
-    hh_locked = {
+def _hh_locked_pids(lines):
+    """Any line whose register already applied happy-hour pricing."""
+    return {
         line.get("product_id")
         for line in lines
         if (line.get("hh_pct") or 0) > 0 and line.get("product_id")
     }
 
-    # 2) Build combo-eligible qty map (skip HH-locked pids entirely)
+
+def _combo_qty_map(lines, hh_locked):
+    """Combo-eligible qty map (HH-locked pids skipped entirely)."""
     line_qtys: dict = {}
     for line in lines:
         pid = line.get("product_id")
         if pid and pid not in hh_locked and (line.get("qty") or 0) > 0:
             line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
+    return line_qtys
 
+
+def _combo_potential(c, subtotal):
+    return (
+        subtotal * (c.get("discount_value", 0) / 100)
+        if c.get("discount_type") == "percent"
+        else c.get("discount_value", 0)
+    )
+
+
+def _apply_combos(combos, line_qtys, subtotal):
+    """Greedy best-first — biggest discount wins; downstream combos with any
+    overlapping product are skipped (mutual exclusivity). Consumes line_qtys.
+    Returns (combo_discount, combos_applied, combo_locked)."""
+    combo_discount = 0.0
+    combos_applied = []
     combo_locked: set = set()
-    if combos:
+    for c in sorted(
+        [c for c in combos if c.get("active", True)],
+        key=lambda c: _combo_potential(c, subtotal),
+        reverse=True,
+    ):
+        involved = _combo_involved_pids(c)
+        if involved & combo_locked or not _combo_matches(c, line_qtys):
+            continue
+        d = _combo_potential(c, subtotal)
+        combo_discount += d
+        combos_applied.append(
+            {
+                "name": c.get("name"),
+                "discount_type": c.get("discount_type"),
+                "discount_value": c.get("discount_value"),
+                "applied_discount": round(d, 2),
+                "locked_product_ids": list(involved),
+            }
+        )
+        combo_locked |= involved
+        for pid in involved:
+            line_qtys.pop(pid, None)
+    return combo_discount, combos_applied, combo_locked
 
-        def _potential(c):
-            return (
-                subtotal * (c.get("discount_value", 0) / 100)
-                if c.get("discount_type") == "percent"
-                else c.get("discount_value", 0)
-            )
 
-        # Greedy best-first — biggest discount wins; downstream combos with any
-        # overlapping product are skipped (mutual exclusivity).
-        for c in sorted(
-            [c for c in combos if c.get("active", True)],
-            key=_potential,
-            reverse=True,
-        ):
-            involved = _combo_involved_pids(c)
-            if involved & combo_locked:
-                continue
-            if not _combo_matches(c, line_qtys):
-                continue
-            d = _potential(c)
-            combo_discount += d
-            combos_applied.append(
-                {
-                    "name": c.get("name"),
-                    "discount_type": c.get("discount_type"),
-                    "discount_value": c.get("discount_value"),
-                    "applied_discount": round(d, 2),
-                    "locked_product_ids": list(involved),
-                }
-            )
-            combo_locked |= involved
-            for pid in involved:
-                line_qtys.pop(pid, None)
-
-    # 3) Order-level discount only against lines NOT locked by HH or a combo
-    promo_locked = hh_locked | combo_locked
+def _order_level_discount(lines, promo_locked, discount_type, discount_value):
+    """Order-level discount only against lines NOT locked by HH or a combo."""
     disc_base = sum(
         line["price"] * line["qty"]
         for line in lines
         if line.get("product_id") not in promo_locked
     )
     if discount_type == "percent":
-        discount = disc_base * (discount_value / 100.0)
-    elif discount_type == "cash":
-        discount = min(discount_value, disc_base)
+        return disc_base * (discount_value / 100.0)
+    if discount_type == "cash":
+        return min(discount_value, disc_base)
+    return 0.0
 
+
+def _compute_totals(
+    lines, discount_type, discount_value, service_charge_pct, combos=None
+):
+    """See module docstring for the exclusivity rule."""
+    subtotal = sum(line["price"] * line["qty"] for line in lines)
+    hh_locked = _hh_locked_pids(lines)
+    line_qtys = _combo_qty_map(lines, hh_locked)
+
+    combo_discount = 0.0
+    combos_applied = []
+    combo_locked: set = set()
+    if combos:
+        combo_discount, combos_applied, combo_locked = _apply_combos(
+            combos, line_qtys, subtotal
+        )
+
+    discount = _order_level_discount(
+        lines, hh_locked | combo_locked, discount_type, discount_value
+    )
     net = max(0.0, subtotal - discount - combo_discount)
     service = round(net * (service_charge_pct / 100.0), 2)
     total = round(net + service, 2)
@@ -281,11 +299,8 @@ async def fire_order(
     return {"fired": fired}
 
 
-@router.post("/orders/{oid}/pay")
-async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_user)):
-    o = await db.orders.find_one({"_id": _oid(oid)})
-    if not o:
-        raise HTTPException(404, "Not found")
+def _build_payment(body: PaymentIn, o: dict, user: dict) -> dict:
+    """Validate split/cash totals and build the payment record."""
     change = 0.0
     if body.method == "split":
         paid = sum((s.get("amount") or 0) for s in body.splits)
@@ -297,7 +312,7 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
         change = round(paid - o["total"], 2)
     elif body.method == "cash":
         change = round(body.amount - o["total"], 2)
-    payment = {
+    return {
         "method": body.method,
         "amount": body.amount,
         "tip": body.tip,
@@ -306,6 +321,61 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
         "paid_at": datetime.now(timezone.utc).isoformat(),
         "cashier_id": user["id"],
     }
+
+
+async def _apply_member_loyalty(o: dict):
+    """Update member stats post-payment, then fire the best-effort loyalty
+    auto-earn (points/stamps/vouchers)."""
+    opened = o.get("opened_at")
+    dur_min = 0
+    if opened:
+        try:
+            d = datetime.now(timezone.utc) - datetime.fromisoformat(opened)
+            dur_min = int(d.total_seconds() / 60)
+        except Exception:
+            dur_min = 0
+    item_names = [line["name"] for line in o.get("lines", [])]
+    member = await db.members.find_one({"_id": _oid(o["member_id"])})
+    if not member:
+        return
+    # Snapshot pre-payment lifetime_spend BEFORE the $set so tier promotion
+    # detection in on_payment_earn works (previously dead-code — pre & post
+    # spend were identical because the $set had already run).
+    pre_spend = member.get("lifetime_spend", 0.0)
+    pre_snapshot = {**member, "lifetime_spend": pre_spend}
+    visits = member.get("visits", 0) + 1
+    lifetime = pre_spend + o["total"]
+    points = member.get("points", 0) + int(o["total"] // 10)
+    fav = list(set((member.get("favorite_items") or []) + item_names))[:20]
+    avg_prev = member.get("avg_duration_min", 0) or 0
+    avg_new = int(((avg_prev * (visits - 1)) + dur_min) / max(visits, 1))
+    await db.members.update_one(
+        {"_id": _oid(o["member_id"])},
+        {
+            "$set": {
+                "visits": visits,
+                "lifetime_spend": lifetime,
+                "points": points,
+                "favorite_items": fav,
+                "avg_duration_min": avg_new,
+            }
+        },
+    )
+    # Loyalty auto-earn — pass pre-payment snapshot so tier promotion fires.
+    try:
+        from routers.loyalty import on_payment_earn
+
+        await on_payment_earn(pre_snapshot, o)
+    except Exception:
+        pass  # loyalty is best-effort; must not block pay
+
+
+@router.post("/orders/{oid}/pay")
+async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"_id": _oid(oid)})
+    if not o:
+        raise HTTPException(404, "Not found")
+    payment = _build_payment(body, o, user)
     await db.orders.update_one(
         {"_id": _oid(oid)},
         {
@@ -326,47 +396,7 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
     except Exception:
         pass
     if o.get("member_id"):
-        opened = o.get("opened_at")
-        dur_min = 0
-        if opened:
-            try:
-                d = datetime.now(timezone.utc) - datetime.fromisoformat(opened)
-                dur_min = int(d.total_seconds() / 60)
-            except Exception:
-                dur_min = 0
-        item_names = [line["name"] for line in o.get("lines", [])]
-        member = await db.members.find_one({"_id": _oid(o["member_id"])})
-        if member:
-            # Snapshot pre-payment lifetime_spend BEFORE the $set so tier promotion
-            # detection in on_payment_earn works (previously dead-code — pre & post
-            # spend were identical because the $set had already run).
-            pre_spend = member.get("lifetime_spend", 0.0)
-            pre_snapshot = {**member, "lifetime_spend": pre_spend}
-            visits = member.get("visits", 0) + 1
-            lifetime = pre_spend + o["total"]
-            points = member.get("points", 0) + int(o["total"] // 10)
-            fav = list(set((member.get("favorite_items") or []) + item_names))[:20]
-            avg_prev = member.get("avg_duration_min", 0) or 0
-            avg_new = int(((avg_prev * (visits - 1)) + dur_min) / max(visits, 1))
-            await db.members.update_one(
-                {"_id": _oid(o["member_id"])},
-                {
-                    "$set": {
-                        "visits": visits,
-                        "lifetime_spend": lifetime,
-                        "points": points,
-                        "favorite_items": fav,
-                        "avg_duration_min": avg_new,
-                    }
-                },
-            )
-            # Loyalty auto-earn — pass pre-payment snapshot so tier promotion fires.
-            try:
-                from routers.loyalty import on_payment_earn
-
-                await on_payment_earn(pre_snapshot, o)
-            except Exception:
-                pass  # loyalty is best-effort; must not block pay
+        await _apply_member_loyalty(o)
     return serialize(await db.orders.find_one({"_id": _oid(oid)}))
 
 
@@ -546,6 +576,53 @@ def _potential_discount(c: dict, subtotal_hint: float) -> float:
     return c.get("discount_value", 0)
 
 
+def _table_combo_hints(o: dict, combos: list, prods: dict) -> list:
+    """Active combos where adding ONE more unit of a product would tip this
+    order into matching. Best hint per combo, sorted by net gain, top 3."""
+    hh_locked = {
+        line.get("product_id") for line in o["lines"] if (line.get("hh_pct") or 0) > 0
+    }
+    line_qtys: dict = {}
+    for line in o["lines"]:
+        pid = line.get("product_id")
+        if pid and pid not in hh_locked and (line.get("qty") or 0) > 0:
+            line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
+
+    sub_now = sum(line["price"] * line["qty"] for line in o["lines"])
+    hints = []
+    for c in combos:
+        if _combo_matches(c, line_qtys):
+            continue  # already applied — skip
+        for pid in _combo_involved_pids(c):
+            if pid in hh_locked or pid not in prods:
+                continue
+            trial = dict(line_qtys)
+            trial[pid] = trial.get(pid, 0) + 1
+            if not _combo_matches(c, trial):
+                continue
+            p = prods[pid]
+            price = p.get("price", 0) or 0
+            d = _potential_discount(c, sub_now + price)
+            hints.append(
+                {
+                    "combo_id": str(c["_id"]),
+                    "combo_name": c.get("name"),
+                    "product_id": pid,
+                    "product_name": p.get("name"),
+                    "product_price": price,
+                    "discount": round(d, 2),
+                    "discount_type": c.get("discount_type"),
+                    "discount_value": c.get("discount_value"),
+                    "net_gain": round(
+                        d - price, 2
+                    ),  # positive if the discount beats the extra product's cost
+                }
+            )
+            break  # 1 hint per combo is enough
+    hints.sort(key=lambda h: -h["net_gain"])
+    return hints[:3]
+
+
 @router.get("/floorplan/combo-hints")
 async def combo_hints(user: dict = Depends(get_current_user)):
     """For every occupied table, list active combos where adding ONE more unit
@@ -563,54 +640,13 @@ async def combo_hints(user: dict = Depends(get_current_user)):
     for o in open_orders:
         if not o.get("table_id") or not o.get("lines"):
             continue
-        hh_locked = {
-            line.get("product_id")
-            for line in o["lines"]
-            if (line.get("hh_pct") or 0) > 0
-        }
-        line_qtys: dict = {}
-        for line in o["lines"]:
-            pid = line.get("product_id")
-            if pid and pid not in hh_locked and (line.get("qty") or 0) > 0:
-                line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
-
-        sub_now = sum(line["price"] * line["qty"] for line in o["lines"])
-        table_hints = []
-        for c in combos:
-            if _combo_matches(c, line_qtys):
-                continue  # already applied — skip
-            for pid in _combo_involved_pids(c):
-                if pid in hh_locked or pid not in prods:
-                    continue
-                trial = dict(line_qtys)
-                trial[pid] = trial.get(pid, 0) + 1
-                if _combo_matches(c, trial):
-                    p = prods[pid]
-                    price = p.get("price", 0) or 0
-                    d = _potential_discount(c, sub_now + price)
-                    table_hints.append(
-                        {
-                            "combo_id": str(c["_id"]),
-                            "combo_name": c.get("name"),
-                            "product_id": pid,
-                            "product_name": p.get("name"),
-                            "product_price": price,
-                            "discount": round(d, 2),
-                            "discount_type": c.get("discount_type"),
-                            "discount_value": c.get("discount_value"),
-                            "net_gain": round(
-                                d - price, 2
-                            ),  # positive if the discount beats the extra product's cost
-                        }
-                    )
-                    break  # 1 hint per combo is enough
+        table_hints = _table_combo_hints(o, combos, prods)
         if table_hints:
-            table_hints.sort(key=lambda h: -h["net_gain"])
             out.append(
                 {
                     "table_id": o["table_id"],
                     "order_id": str(o["_id"]),
-                    "hints": table_hints[:3],
+                    "hints": table_hints,
                 }
             )
     return out

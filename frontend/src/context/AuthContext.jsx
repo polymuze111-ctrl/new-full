@@ -35,9 +35,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await api.post("/auth/logout");
-    } catch (err) {
+    } catch {
       // Non-blocking — server may be offline; we still clear local state below.
-      console.warn("[auth/logout] server call failed:", err);
     }
     setUser(null);
   }, []);

@@ -21,6 +21,9 @@ const METHODS = [
   ["unionpay", Coins, "UnionPay", "#EC4899"],
 ];
 
+// Split-payment dropdowns never offer "split" itself — computed once, not per render.
+const PAYABLE_METHODS = METHODS.filter((m) => m[0] !== "split");
+
 export default function PaymentModal({ total, guests, onClose, onPay }) {
   const [mode, setMode] = useState("single");
   const [method, setMethod] = useState("cash");
@@ -225,7 +228,7 @@ function SplitMode({ guests, splits, setSplits, splitMode, applySplitMode, split
             <span className="text-xs font-mono text-[var(--muted)]">{s.label || `Split ${i + 1}`}</span>
             <select data-testid={`split-method-${i}`} value={s.method} onChange={(e) => setSplit(i, "method", e.target.value)}
               className="bg-[var(--surface-2)] border border-[var(--border)] rounded-md px-2 py-1.5 text-sm">
-              {METHODS.filter(m => m[0] !== "split").map(([v, , l]) => <option key={v} value={v}>{l}</option>)}
+              {PAYABLE_METHODS.map(([v, , l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             <input data-testid={`split-amount-${i}`} type="number" step="0.01" value={s.amount}
               onChange={(e) => setSplit(i, "amount", e.target.value)}

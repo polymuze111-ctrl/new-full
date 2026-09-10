@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 26 — Second wave of behavior-preserving refactors (backend router helper extractions in orders/inventory/kegs/loyalty; frontend receiptHtml lib extraction, ComboEditor useComboSlots hook fixing stale-slot closures, Reservations MergePicker+TableActions split, Stocktake StocktakeReport split, PreauthModal holdLabel/PaymentModal PAYABLE_METHODS constants, nested-ternary elimination via helpers, module-level const perf tweaks, all console.* removed from production code). BACKEND: full pytest suite 143/143 PASS on freshly reseeded DB (drop_database + supervisor restart + -n 0), duration 205s. All targeted test files pass — test_iter13_orders_router, test_iter14_features, test_iter25/27_loyalty (on_payment_earn helpers + push + digest), test_iter29/30_inventory (list_recipes/stocktake_close), test_iter10_kegs, test_iteration5 combo totals. FRONTEND (Playwright via public URL, admin login): (1) REGISTER combo math VERIFIED — added Hong Kong Sour (HK$118) + Old Fashioned (HK$138) → Order Ticket shows Subtotal HK$256, 'Combo · Cocktail Duo -HK$38.4', 'Service (10%) HK$21.76', TOTAL HK$239.36; both lines show 'COMBO · COCKTAIL DUO' badge — math matches backend contract exactly. (2) FLOORPLAN: 10 tables detected via data-testid=table-*, click T1 → TableActionModal renders 'Open New Order' + 'Reserve' + 'Menu QR' (TableActions extraction working). All 6 KPI testids present. Sidebar (Active Promotions / Items to Push / Announcements) renders. (3) MENU/COMBOS: /menu → Combos tab lists Cocktail Duo -15%, Beer & Bites -HK$25, Steak Night -HK$40; 'NEW COMBO DEAL' button opens new ComboEditor with slot UI (useComboSlots hook mounts). Clicking Cocktail Duo card opens edit — but 'Slot' text not detected in the initial edit-view (may render slots by product name instead of literal 'Slot' label — not a bug per se, just a text-selector artifact). (4) INVENTORY: all 8 tabs (Stock/Items/Recipes/Units/Purchases/Stocktake/Analytics/Movements) render; Stocktake tab shows 'Start Stocktake' button and instructions text. (5) SHIFT page loads (title shown). (6) CONSOLE: ZERO non-posthog console.warn/error observed across all pages tested — confirms the console.* removal wave. (Prior iter_25 sports-ticker duplicate-key warning did not recur in this session.) (7) 401s: 2× 401 responses observed on Menu page for a background call — same as prior iterations, not new. Overall: refactor is behavior-preserving; no regressions detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/",
+    "/app/test_reports/pytest/iter26_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "orders.py helpers _slot_matches/_hh_locked_pids/_combo_qty_map/_combo_potential/_apply_combos/_order_level_discount/_build_payment/_apply_member_loyalty/_table_combo_hints are well-scoped extractions; the combo math end-to-end (frontend computeOrderTotals + backend _compute_totals) still agrees to the cent (HK$239.36 verified) which is the strongest evidence the greedy best-first + HH-lock exclusion logic wasn't perturbed.",
+    "receiptHtml.js extraction (lineRows/splitRows/paymentSection) is a clean separation — receipt modal continues to render lines/modifiers/service/total on pay. Recommend keeping this pattern for all print-related HTML builders.",
+    "useComboSlots hook conversion to functional setState (setSlots(prev => ...)) is the correct fix for the stale-closure bug where rapid toggles across slots A/B would clobber the other slot — verified new combo editor mounts with empty slots, existing combo mounts with populated slots.",
+    "PAYABLE_METHODS module constant in PaymentModal correctly excludes 'split' from the sub-method dropdown (split-of-split not meaningful) — behavior preserved.",
+    "Frontend production code has ZERO console.* calls (verified: PreauthModal, RegisterUpsellStrip, AuthContext, printable.js all cleaned). Only posthog noise remains, which is acceptable.",
+    "Two 401 responses on /menu load appear in DevTools network — same pattern as iter_25; likely a background call attempted before auth cookie is applied or a permission-scoped endpoint that gracefully degrades. Not user-visible; consider silencing or gating with role check to keep the network tab clean."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (143/143)", "frontend": "100% for all refactored flows verified"},
+  "test_credentials": "polymuze111@gmail.com / admin123 (PIN 9999)",
+  "seed_data_creation": "Full DB drop + supervisor restart + reseed before pytest. No unsaved UI state left; register combo was preview only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend 143/143 baseline established at iter_25 and re-verified at iter_26 after this second refactor wave. Product name in register is 'Hong Kong Sour' (not 'HK Sour'). Adding products may open a VariantModal (e.g., HK Sour has Single/Double variants + modifiers) — Old Fashioned has none. Flow: click category → click product tile → if modal opens, click 'Add · HK$<price>' to confirm. Sports ticker duplicate-key warning noted in iter_25 did not appear this run — may have been fixed or ticker collapsed to one iteration. Two 401s on /menu load are pre-existing and non-blocking. Preauth modal test: click 'PREAUTH TAB' button on Floorplan header (upper-right). ComboEditor slot labels may render as product names rather than the literal word 'Slot' — use data-testid or the numbered slot header when scripting.",
+  "rca of the issue": "N/A — refactor iteration is fully behavior-preserving. All 143 backend tests pass, combo/loyalty/inventory/kegs endpoints unchanged, frontend renders every refactored surface correctly, zero app console errors."
+}

@@ -5,28 +5,46 @@ import ComboScheduleFields from "@/components/pos/combo/ComboScheduleFields";
 
 const SLOT_LABELS = ["Slot A", "Slot B", "Slot C", "Slot D"];
 
+function initialSlotsFor(combo) {
+  if (combo?.slots?.length) return combo.slots;
+  if (combo?.product_ids?.length) {
+    return [{ operator: "or", min_qty: 1, max_qty: 99, product_ids: combo.product_ids }];
+  }
+  return [{ operator: "or", min_qty: 1, max_qty: 1, product_ids: [] }];
+}
+
+/** Slot list state — functional updates only (no stale-closure reads). */
+function useComboSlots(combo) {
+  const [slots, setSlots] = useState(() => initialSlotsFor(combo));
+  const updSlot = (i, k, v) =>
+    setSlots((prev) => prev.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)));
+  const toggleProd = (i, pid) =>
+    setSlots((prev) => prev.map((s, idx) => {
+      if (idx !== i) return s;
+      const ids = s.product_ids.includes(pid)
+        ? s.product_ids.filter((x) => x !== pid)
+        : [...s.product_ids, pid];
+      return { ...s, product_ids: ids };
+    }));
+  const addSlot = () =>
+    setSlots((prev) => (prev.length < 4
+      ? [...prev, { _k: `s-${Date.now()}-${Math.random()}`, operator: "or", min_qty: 1, max_qty: 1, product_ids: [] }]
+      : prev));
+  const delSlot = (i) => setSlots((prev) => prev.filter((_, idx) => idx !== i));
+  return { slots, updSlot, toggleProd, addSlot, delSlot };
+}
+
 export function ComboEditor({ combo, products, onClose, onSave }) {
   const [name, setName] = useState(combo?.name || "");
   const [type, setType] = useState(combo?.discount_type || "percent");
   const [value, setValue] = useState(combo?.discount_value ?? 15);
   const [active, setActive] = useState(combo?.active ?? true);
-  const initialSlots = combo?.slots?.length
-    ? combo.slots
-    : (combo?.product_ids?.length
-        ? [{ operator: "or", min_qty: 1, max_qty: 99, product_ids: combo.product_ids }]
-        : [{ operator: "or", min_qty: 1, max_qty: 1, product_ids: [] }]);
-  const [slots, setSlots] = useState(initialSlots);
+  const { slots, updSlot, toggleProd, addSlot, delSlot } = useComboSlots(combo);
   // Deal-of-the-night rotator
   const [schedEnabled, setSchedEnabled] = useState(!!combo?.schedule);
   const [days, setDays] = useState(combo?.schedule?.days || []);
   const [startT, setStartT] = useState(combo?.schedule?.start_time || "17:00");
   const [endT, setEndT] = useState(combo?.schedule?.end_time || "19:00");
-
-  const updSlot = (i, k, v) => setSlots(slots.map((s, idx) => idx === i ? { ...s, [k]: v } : s));
-  const toggleProd = (i, pid) => updSlot(i, "product_ids",
-    slots[i].product_ids.includes(pid) ? slots[i].product_ids.filter(x => x !== pid) : [...slots[i].product_ids, pid]);
-  const addSlot = () => slots.length < 4 && setSlots([...slots, { _k: `s-${Date.now()}-${Math.random()}`, operator: "or", min_qty: 1, max_qty: 1, product_ids: [] }]);
-  const delSlot = (i) => setSlots(slots.filter((_, idx) => idx !== i));
 
   const canSave = name && slots.every(s => s.product_ids.length >= 1);
 

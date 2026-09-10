@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { api, fmtHKD } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -29,6 +29,36 @@ const TABS = [
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "movements", label: "Movements", icon: ArrowDownCircle },
 ];
+
+function stockColor(it) {
+  if (it.out_of_stock) return "#F43F5E";
+  if (it.low_stock) return "#FFB800";
+  return "#10B981";
+}
+
+function stockCardCls(it) {
+  if (it.out_of_stock) return "border-[var(--rose)] animate-pulse";
+  if (it.low_stock) return "border-[var(--amber)]";
+  return "border-[var(--border)]";
+}
+
+function baseUnitLabel(kind, plural = false) {
+  if (kind === "volume") return "ml";
+  if (kind === "mass") return "g";
+  return plural ? "units" : "unit";
+}
+
+const REASON_BADGE = {
+  sale: "bg-[var(--cyan)]/15 text-[var(--cyan)]",
+  restock: "bg-[var(--emerald)]/15 text-[var(--emerald)]",
+};
+const REASON_BADGE_DEFAULT = "bg-[var(--rose)]/15 text-[var(--rose)]";
+
+const StockBadge = ({ it }) => {
+  if (it.out_of_stock) return <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--rose)] text-white font-black">OUT</span>;
+  if (it.low_stock) return <AlertTriangle size={14} className="ml-auto text-[var(--amber)]" />;
+  return null;
+};
 
 export default function Inventory() {
   const [tab, setTab] = useState("stock");
@@ -82,7 +112,7 @@ export default function Inventory() {
     toast.success("Recipe deleted"); load();
   };
 
-  const recipeByPid = Object.fromEntries(recipes.map((r) => [r.product_id, r]));
+  const recipeByPid = useMemo(() => Object.fromEntries(recipes.map((r) => [r.product_id, r])), [recipes]);
 
   return (
     <div data-testid="inventory-page">
@@ -126,17 +156,11 @@ export default function Inventory() {
         <div className="grid grid-cols-3 gap-3">
           {items.map((it) => (
             <div key={it.id} data-testid={`stock-card-${it.name}`}
-              className={`p-4 rounded-xl border bg-[var(--surface)] ${
-                it.out_of_stock ? "border-[var(--rose)] animate-pulse" : it.low_stock ? "border-[var(--amber)]" : "border-[var(--border)]"
-              }`}>
+              className={`p-4 rounded-xl border bg-[var(--surface)] ${stockCardCls(it)}`}>
               <div className="flex items-center gap-2">
                 <Package size={15} className="text-[var(--cyan)]" />
                 <div className="font-display font-bold text-white">{it.name}</div>
-                {it.out_of_stock
-                  ? <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--rose)] text-white font-black">OUT</span>
-                  : it.low_stock
-                    ? <AlertTriangle size={14} className="ml-auto text-[var(--amber)]" />
-                    : null}
+                <StockBadge it={it} />
               </div>
               <div className="text-[10px] font-mono uppercase text-[var(--muted)] mt-0.5">
                 {it.category}{it.supplier ? ` · ${it.supplier}` : ""}
@@ -144,7 +168,7 @@ export default function Inventory() {
               <div className="mt-3 flex items-end justify-between">
                 <div>
                   <span data-testid={`stock-qty-${it.name}`} className="font-display font-black text-3xl"
-                    style={{ color: it.out_of_stock ? "#F43F5E" : it.low_stock ? "#FFB800" : "#10B981" }}>
+                    style={{ color: stockColor(it) }}>
                     {+it.stock.toFixed(2)}
                   </span>
                   <span className="text-xs font-mono text-[var(--muted)] ml-1">{it.usage_unit_symbol || "units"}</span>
@@ -193,7 +217,7 @@ export default function Inventory() {
                   <td className="px-4 py-2 font-mono text-xs">{it.purchase_unit_symbol || "—"}</td>
                   <td className="px-4 py-2 font-mono text-xs">{it.usage_unit_symbol || "—"}</td>
                   <td className="px-4 py-2 text-right font-mono text-xs">{fmtHKD(it.cost_per_purchase_unit)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: it.out_of_stock ? "#F43F5E" : it.low_stock ? "#FFB800" : "#10B981" }}>
+                  <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: stockColor(it) }}>
                     {+it.stock.toFixed(2)} {it.usage_unit_symbol}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
@@ -271,7 +295,7 @@ export default function Inventory() {
                   {u.custom && <span className="text-[9px] font-mono px-1 rounded bg-[var(--purple)]/20 text-[var(--purple)] uppercase">custom</span>}
                 </div>
                 <div className="text-[10px] font-mono text-[var(--muted)] mt-1">
-                  <span className="text-[var(--cyan)]">{u.symbol}</span> · {u.kind} · 1 {u.symbol} = {u.factor_to_base} {u.kind === "volume" ? "ml" : u.kind === "mass" ? "g" : "unit"}
+                  <span className="text-[var(--cyan)]">{u.symbol}</span> · {u.kind} · 1 {u.symbol} = {u.factor_to_base} {baseUnitLabel(u.kind)}
                 </div>
                 <div className="flex gap-1 mt-2">
                   <button data-testid={`unit-edit-${u.symbol}`} onClick={() => setUnitForm(u)}
@@ -314,10 +338,7 @@ export default function Inventory() {
                   <td className="px-4 py-2 font-mono text-xs text-[var(--muted)]">{(m.at || "").slice(5, 16).replace("T", " ")}</td>
                   <td className="px-4 py-2 font-semibold text-white">{m.item_name}</td>
                   <td className="px-4 py-2">
-                    <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${
-                      m.reason === "sale" ? "bg-[var(--cyan)]/15 text-[var(--cyan)]"
-                      : m.reason === "restock" ? "bg-[var(--emerald)]/15 text-[var(--emerald)]"
-                      : "bg-[var(--rose)]/15 text-[var(--rose)]"}`}>{m.reason}</span>
+                    <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${REASON_BADGE[m.reason] || REASON_BADGE_DEFAULT}`}>{m.reason}</span>
                   </td>
                   <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: m.delta >= 0 ? "#10B981" : "#F43F5E" }}>
                     {m.delta >= 0 ? <ArrowUpCircle size={11} className="inline mr-1" /> : <ArrowDownCircle size={11} className="inline mr-1" />}
@@ -497,7 +518,7 @@ function UnitModal({ unit, onClose, onDone }) {
         </div>
       </div>
       <label className="text-[10px] font-mono uppercase text-[var(--muted)]">
-        1 {f.symbol || "unit"} = ? {f.kind === "volume" ? "ml" : f.kind === "mass" ? "g" : "units"}
+        1 {f.symbol || "unit"} = ? {baseUnitLabel(f.kind, true)}
       </label>
       <input data-testid="unit-factor" type="number" min="0" step="any" value={f.factor_to_base ?? 1} onChange={(e) => set("factor_to_base", e.target.value)} className={`${inputCls} mt-1 mb-4`} />
       <button data-testid="unit-submit" onClick={submit} className="btn-neon w-full py-2.5 rounded-lg text-xs uppercase">

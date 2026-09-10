@@ -10,6 +10,16 @@ Advanced restaurant POS for a Hong Kong bar/restaurant running 11am–6am, 7 day
 - Theme: Hong Kong neon cyberpunk dark mode (`#0B0E14` bg, `#00F2FE` cyan, `#FFB800` amber)
 - Code checker: `bash /app/scripts/code_check.sh` — flake8 + isort + black + mypy + pytest (serial, fresh DB reseed). `--fix` for auto-format.
 
+## What's Implemented (v26 · Sep 2026 — Code-quality report #2 fixes)
+- **Backend complexity refactors** (behavior-preserving, suite-verified): orders.py `_combo_matches`→+`_slot_matches`, `_compute_totals`→+`_hh_locked_pids`/`_combo_qty_map`/`_combo_potential`/`_apply_combos`/`_order_level_discount`, `combo_hints`→+`_table_combo_hints`, `pay_order`→+`_build_payment`/`_apply_member_loyalty`; inventory.py `list_recipes`→+`_enrich_recipe`/`_recipe_line_view`, `stocktake_close`→+`_apply_stocktake_count`; kegs.py `_aggregate_prep`→+`_prep_entry`; loyalty.py `_hh_points_boost`→+`_any_hh_window_active`, `_visit_streak_bonus`→+`_is_consecutive_week`, `send_weekly_digest`→+`_weekly_digest_body`.
+- **Real bug fixed**: ComboEditor slot handlers used stale `slots` closures → converted to functional setState in new `useComboSlots` hook (toggling products no longer risks clobbering other slots).
+- **Verified false positives in report**: hook-dependency flags targeted module-level `api` import and callback params; referenced non-existent files (LoyaltyTiers.jsx, GuestSummary.jsx, InventoryCounts.jsx); zero real `is`-vs-`==` bugs (analyzer matched the docstring "86'd").
+- **Component splits**: Receipt.jsx → `src/lib/receiptHtml.js` (lineRows/splitRows/paymentSection helpers); Reservations.jsx TableActionModal → +MergePicker/TableActions; Stocktake.jsx → +StocktakeReport/varianceColor.
+- **Nested ternaries eliminated**: Inventory.jsx ×7 (stockColor/stockCardCls/baseUnitLabel/StockBadge/REASON_BADGE), ComboEditor initialSlotsFor, PreauthModal holdLabel, Stocktake varianceColor.
+- **Perf**: PaymentModal PAYABLE_METHODS module const; Inventory recipeByPid useMemo; Shift visibleHistory useMemo.
+- **Production cleanup**: all 6 frontend console.* statements removed (PreauthModal, RegisterUpsellStrip ×3, AuthContext, printable.js).
+- Verified: ALL CHECKS PASSED (flake8/isort/black/mypy/pytest 143/143), UI screenshots clean.
+
 ## What's Implemented (v25 · Sep 2026 — Code-quality report fixes)
 - **Security (critical)**: auth token removed from localStorage entirely — httpOnly `access_token` cookie only; api.js interceptor deleted; AuthContext rehydrates via `/auth/me` with `withCredentials`. Backend already set/cleared the cookie on login/pin-login/logout.
 - **Hook stale-closure fixes**: Loyalty `load` wrapped in useCallback with correct deps; Register + QuickBar happy-hour logic deduped into `src/hooks/useHappyHour.js`; Register's 85-line totals memo extracted to pure `src/lib/orderTotals.js::computeOrderTotals` (unit-testable, referentially stable).

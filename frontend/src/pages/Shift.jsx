@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, fmtHKD } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -10,6 +10,11 @@ export default function Shift() {
   const [current, setCurrent] = useState({ open: false });
   const [history, setHistory] = useState([]);
   const [busy, setBusy] = useState(false);
+
+  const visibleHistory = useMemo(
+    () => history.filter(h => !current.open || h.shift.id !== current.shift?.id).slice(0, 20),
+    [history, current.open, current.shift]
+  );
 
   const load = async () => {
     const c = await api.get("/shifts/current"); setCurrent(c.data);
@@ -93,7 +98,7 @@ export default function Shift() {
 
       <div className="mb-2 text-xs font-mono uppercase tracking-widest text-[var(--muted)]">Recent Shifts</div>
       <div className="space-y-2">
-        {history.filter(h => !current.open || h.shift.id !== current.shift?.id).slice(0, 20).map(h => (
+        {visibleHistory.map(h => (
           <div key={h.shift.id} data-testid={`shift-row-${h.shift.id}`}
                className="p-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] flex items-center gap-4">
             <div className="w-9 h-9 rounded-full bg-[var(--surface-2)] flex items-center justify-center font-bold">

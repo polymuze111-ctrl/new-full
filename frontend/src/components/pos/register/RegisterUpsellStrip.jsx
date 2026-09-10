@@ -84,7 +84,7 @@ export default function RegisterUpsellStrip({ order, totals, combos, products, o
       };
       pendingRef.current.set(key, meta);
       api.post("/upsell/log", { ...meta, status: "shown" })
-        .catch((err) => console.warn("[upsell/log shown]", err));
+        .catch(() => {});
     });
   }, [hints, order?.id, order?.table_id]);
 
@@ -98,7 +98,7 @@ export default function RegisterUpsellStrip({ order, totals, combos, products, o
     if ((cur === "paid" || cur === "voided") && prev !== cur && pendingRef.current.size > 0) {
       for (const meta of pendingRef.current.values()) {
         api.post("/upsell/log", { ...meta, status: "dismissed" })
-          .catch((err) => console.warn("[upsell/log dismissed]", err));
+          .catch(() => {});
       }
       pendingRef.current.clear();
     }
@@ -132,7 +132,7 @@ export default function RegisterUpsellStrip({ order, totals, combos, products, o
       potential_discount: h.value,
       source: "register",
       status: "accepted",
-    }).catch((err) => console.warn("[upsell/log accepted]", err));
+    }).catch(() => {});
     onAdd?.(h.product);
   };
 

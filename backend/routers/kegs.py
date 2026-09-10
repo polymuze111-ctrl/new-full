@@ -219,6 +219,18 @@ async def prep_bump_all(product_id: str, user: dict = Depends(get_current_user))
     return {"bumped": bumped}
 
 
+def _prep_entry(p, line: dict) -> dict:
+    return {
+        "product_id": line.get("product_id"),
+        "name": (p or {}).get("name") or line["name"],
+        "kind": (p or {}).get("kind")
+        or ("drink" if line.get("course") == "drink" else "food"),
+        "course": line.get("course"),
+        "total": 0,
+        "tables": {},
+    }
+
+
 def _aggregate_prep(orders: list, tables: dict, prods: dict) -> dict:
     """Group fired-not-bumped lines across open orders by product."""
     prep: dict = {}
@@ -230,20 +242,10 @@ def _aggregate_prep(orders: list, tables: dict, prods: dict) -> dict:
                 continue
             key = line.get("product_id") or line["name"]
             if key not in prep:
-                p = prods.get(line.get("product_id") or "")
-                prep[key] = {
-                    "product_id": line.get("product_id"),
-                    "name": (p or {}).get("name") or line["name"],
-                    "kind": (p or {}).get("kind")
-                    or ("drink" if line.get("course") == "drink" else "food"),
-                    "course": line.get("course"),
-                    "total": 0,
-                    "tables": {},
-                }
-            prep[key]["total"] += line.get("qty") or 1
-            prep[key]["tables"][tname] = prep[key]["tables"].get(tname, 0) + (
-                line.get("qty") or 1
-            )
+                prep[key] = _prep_entry(prods.get(line.get("product_id") or ""), line)
+            qty = line.get("qty") or 1
+            prep[key]["total"] += qty
+            prep[key]["tables"][tname] = prep[key]["tables"].get(tname, 0) + qty
     return prep
 
 
