@@ -3,9 +3,13 @@ import { api, fmtHKD } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Package, Plus, AlertTriangle, Trash2, Pencil, Beaker, Ruler,
-  ClipboardList, ArrowDownCircle, ArrowUpCircle, Search, X,
+  ClipboardList, ArrowDownCircle, ArrowUpCircle, Search,
   Truck, ClipboardCheck, BarChart3,
 } from "lucide-react";
+import { Modal, Kpi, inputCls } from "@/components/inventory/common";
+import { PurchaseOrdersTab, POModal } from "@/components/inventory/PurchaseOrders";
+import { StocktakeTab } from "@/components/inventory/Stocktake";
+import { AnalyticsTab } from "@/components/inventory/Analytics";
 
 const REASONS = [
   { id: "restock", label: "Restock", sign: 1 },
@@ -231,8 +235,8 @@ export default function Inventory() {
                   </div>
                   {r && r.lines?.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {r.lines.map((l, i) => (
-                        <span key={i} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)]">
+                      {r.lines.map((l) => (
+                        <span key={`${l.item_id}-${l.unit_id || "base"}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)]">
                           {l.item_name} {l.qty}{l.unit_symbol || ""}
                         </span>
                       ))}
@@ -337,29 +341,6 @@ export default function Inventory() {
       {itemForm && <ItemModal item={itemForm.id ? itemForm : null} units={units} onClose={() => setItemForm(null)} onDone={() => { setItemForm(null); load(); }} />}
       {unitForm && <UnitModal unit={unitForm.id ? unitForm : null} onClose={() => setUnitForm(null)} onDone={() => { setUnitForm(null); load(); }} />}
       {recipeFor && <RecipeModal product={recipeFor} recipe={recipeByPid[recipeFor.id]} items={items} units={units} onClose={() => setRecipeFor(null)} onDone={() => { setRecipeFor(null); load(); }} />}
-    </div>
-  );
-}
-
-const Kpi = ({ label, value, color, testid }) => (
-  <div data-testid={testid} className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-    <div className="text-[10px] font-mono uppercase text-[var(--muted)]">{label}</div>
-    <div className="font-display font-black text-2xl mt-1" style={{ color }}>{value}</div>
-  </div>
-);
-
-const inputCls = "w-full px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm outline-none focus:border-[var(--cyan)]";
-
-function Modal({ title, onClose, children, testid }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-      <div data-testid={testid} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl w-full max-w-lg p-6 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="font-display font-black text-lg">{title}</div>
-          <button data-testid={`${testid}-close`} onClick={onClose} className="text-[var(--muted)] hover:text-white"><X size={18} /></button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }
@@ -529,11 +510,11 @@ function UnitModal({ unit, onClose, onDone }) {
 function RecipeModal({ product, recipe, items, units, onClose, onDone }) {
   const [mode, setMode] = useState(recipe?.direct_item_id ? "direct" : "lines");
   const [directItemId, setDirectItemId] = useState(recipe?.direct_item_id || "");
-  const [lines, setLines] = useState(recipe?.lines?.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_id: l.unit_id || "" })) || []);
+  const [lines, setLines] = useState(recipe?.lines?.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_id: l.unit_id || "", uid: crypto.randomUUID() })) || []);
   const [mults, setMults] = useState(recipe?.variant_multipliers || {});
   const variants = (product.variants || []).map((v) => v.name);
 
-  const setLine = (i, k, v) => setLines((p) => p.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
+  const setLine = (uid, k, v) => setLines((p) => p.map((l) => (l.uid === uid ? { ...l, [k]: v } : l)));
 
   const submit = async () => {
     const body = {
@@ -573,20 +554,20 @@ function RecipeModal({ product, recipe, items, units, onClose, onDone }) {
       ) : (
         <>
           {lines.map((l, i) => (
-            <div key={i} className="grid grid-cols-[1fr_90px_110px_32px] gap-2 mb-2" data-testid={`recipe-line-${i}`}>
-              <select data-testid={`recipe-item-${i}`} value={l.item_id} onChange={(e) => setLine(i, "item_id", e.target.value)} className={inputCls}>
+            <div key={l.uid} className="grid grid-cols-[1fr_90px_110px_32px] gap-2 mb-2" data-testid={`recipe-line-${i}`}>
+              <select data-testid={`recipe-item-${i}`} value={l.item_id} onChange={(e) => setLine(l.uid, "item_id", e.target.value)} className={inputCls}>
                 <option value="">— item —</option>
                 {items.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select>
-              <input data-testid={`recipe-qty-${i}`} type="number" min="0" step="any" value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="qty" className={inputCls} />
-              <select data-testid={`recipe-unit-${i}`} value={l.unit_id} onChange={(e) => setLine(i, "unit_id", e.target.value)} className={inputCls}>
+              <input data-testid={`recipe-qty-${i}`} type="number" min="0" step="any" value={l.qty} onChange={(e) => setLine(l.uid, "qty", e.target.value)} placeholder="qty" className={inputCls} />
+              <select data-testid={`recipe-unit-${i}`} value={l.unit_id} onChange={(e) => setLine(l.uid, "unit_id", e.target.value)} className={inputCls}>
                 <option value="">item unit</option>
                 {units.map((u) => <option key={u.id} value={u.id}>{u.symbol}</option>)}
               </select>
-              <button data-testid={`recipe-line-del-${i}`} onClick={() => setLines((p) => p.filter((_, j) => j !== i))} className="text-[var(--muted)] hover:text-[var(--rose)]"><Trash2 size={14} /></button>
+              <button data-testid={`recipe-line-del-${i}`} onClick={() => setLines((p) => p.filter((x) => x.uid !== l.uid))} className="text-[var(--muted)] hover:text-[var(--rose)]"><Trash2 size={14} /></button>
             </div>
           ))}
-          <button data-testid="recipe-add-line" onClick={() => setLines((p) => [...p, { item_id: "", qty: "", unit_id: "" }])}
+          <button data-testid="recipe-add-line" onClick={() => setLines((p) => [...p, { item_id: "", qty: "", unit_id: "", uid: crypto.randomUUID() }])}
             className="w-full py-2 rounded-lg border border-dashed border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)] hover:text-[var(--cyan)] hover:border-[var(--cyan)] mb-3">
             + Add ingredient
           </button>
@@ -613,280 +594,3 @@ function RecipeModal({ product, recipe, items, units, onClose, onDone }) {
   );
 }
 
-const PO_STATUS = { open: "#FFB800", received: "#10B981", cancelled: "#94A3B8" };
-
-function PurchaseOrdersTab({ pos, onChanged, onNew }) {
-  const receive = async (po) => {
-    if (!confirm(`Receive PO #${po.id.slice(-6)}? Every line is restocked.`)) return;
-    try {
-      await api.post(`/inventory/purchase-orders/${po.id}/receive`);
-      toast.success("PO received — stock updated"); onChanged();
-    } catch (e) { toast.error(e.response?.data?.detail || "Receive failed"); }
-  };
-  const cancel = async (po) => {
-    if (!confirm(`Cancel PO #${po.id.slice(-6)}?`)) return;
-    try {
-      await api.post(`/inventory/purchase-orders/${po.id}/cancel`);
-      toast.success("PO cancelled"); onChanged();
-    } catch (e) { toast.error(e.response?.data?.detail || "Cancel failed"); }
-  };
-
-  return (
-    <div>
-      <div className="flex justify-end mb-3">
-        <button data-testid="btn-new-po" onClick={onNew}
-          className="btn-neon px-4 py-2 rounded-lg text-xs uppercase flex items-center gap-2">
-          <Plus size={14} /> New Purchase Order
-        </button>
-      </div>
-      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-        <table className="w-full text-sm" data-testid="po-table">
-          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
-            <tr>
-              <th className="text-left px-4 py-2">PO</th><th className="text-left px-4 py-2">Supplier</th>
-              <th className="text-left px-4 py-2">Lines</th><th className="text-right px-4 py-2">Total</th>
-              <th className="text-left px-4 py-2">Status</th><th className="px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {pos.map((po) => (
-              <tr key={po.id} data-testid={`po-row-${po.id.slice(-6)}`} className="border-t border-[var(--border)] hover:bg-[var(--surface)]">
-                <td className="px-4 py-2 font-mono text-xs text-[var(--muted)]">#{po.id.slice(-6)}<br />{(po.created_at || "").slice(0, 10)}</td>
-                <td className="px-4 py-2 font-semibold text-white">{po.supplier || "—"}</td>
-                <td className="px-4 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {(po.lines || []).map((l, i) => (
-                      <span key={i} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)]">
-                        {l.item_name} {l.qty}{l.unit_symbol || ""}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{fmtHKD(po.total_cost)}</td>
-                <td className="px-4 py-2">
-                  <span data-testid={`po-status-${po.id.slice(-6)}`} className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-black"
-                    style={{ color: PO_STATUS[po.status], background: `${PO_STATUS[po.status]}22` }}>
-                    {po.status}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-right whitespace-nowrap">
-                  {po.status === "open" && (
-                    <>
-                      <button data-testid={`po-receive-${po.id.slice(-6)}`} onClick={() => receive(po)}
-                        className="py-1 px-2 rounded bg-[var(--emerald)]/15 border border-[var(--emerald)]/40 text-[10px] font-mono uppercase text-[var(--emerald)] mr-1">Receive</button>
-                      <button data-testid={`po-cancel-${po.id.slice(-6)}`} onClick={() => cancel(po)}
-                        className="py-1 px-2 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)]">Cancel</button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {pos.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-[var(--muted)]">No purchase orders yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function POModal({ items, onClose, onDone }) {
-  const [supplier, setSupplier] = useState("");
-  const [expected, setExpected] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState([{ item_id: "", qty: "", unit_cost: "" }]);
-  const setLine = (i, k, v) => setLines((p) => p.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
-
-  const submit = async () => {
-    const body = {
-      supplier, notes, expected_date: expected || null,
-      lines: lines.filter((l) => l.item_id && parseFloat(l.qty) > 0)
-        .map((l) => ({ item_id: l.item_id, qty: parseFloat(l.qty), unit_cost: parseFloat(l.unit_cost) || 0 })),
-    };
-    if (body.lines.length === 0) return toast.error("Add at least one line");
-    try {
-      await api.post("/inventory/purchase-orders", body);
-      toast.success("Purchase order created"); onDone();
-    } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); }
-  };
-
-  return (
-    <Modal title="New Purchase Order" onClose={onClose} testid="po-modal">
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="text-[10px] font-mono uppercase text-[var(--muted)]">Supplier</label>
-          <input data-testid="po-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} className={`${inputCls} mt-1`} />
-        </div>
-        <div>
-          <label className="text-[10px] font-mono uppercase text-[var(--muted)]">Expected date</label>
-          <input data-testid="po-expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} className={`${inputCls} mt-1`} />
-        </div>
-      </div>
-      <label className="text-[10px] font-mono uppercase text-[var(--muted)]">Lines — qty is in the item's PURCHASE unit</label>
-      <div className="mt-1 mb-2">
-        {lines.map((l, i) => (
-          <div key={i} className="grid grid-cols-[1fr_80px_90px_32px] gap-2 mb-2" data-testid={`po-line-${i}`}>
-            <select data-testid={`po-line-item-${i}`} value={l.item_id} onChange={(e) => setLine(i, "item_id", e.target.value)} className={inputCls}>
-              <option value="">— item —</option>
-              {items.map((x) => <option key={x.id} value={x.id}>{x.name}{x.purchase_unit_symbol ? ` (${x.purchase_unit_symbol})` : ""}</option>)}
-            </select>
-            <input data-testid={`po-line-qty-${i}`} type="number" min="0" step="any" value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="qty" className={inputCls} />
-            <input data-testid={`po-line-cost-${i}`} type="number" min="0" step="any" value={l.unit_cost} onChange={(e) => setLine(i, "unit_cost", e.target.value)} placeholder="HKD/unit" className={inputCls} />
-            <button data-testid={`po-line-del-${i}`} onClick={() => setLines((p) => p.filter((_, j) => j !== i))} className="text-[var(--muted)] hover:text-[var(--rose)]"><Trash2 size={14} /></button>
-          </div>
-        ))}
-      </div>
-      <button data-testid="po-add-line" onClick={() => setLines((p) => [...p, { item_id: "", qty: "", unit_cost: "" }])}
-        className="w-full py-2 rounded-lg border border-dashed border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)] hover:text-[var(--cyan)] hover:border-[var(--cyan)] mb-3">
-        + Add line
-      </button>
-      <label className="text-[10px] font-mono uppercase text-[var(--muted)]">Notes</label>
-      <input data-testid="po-notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={`${inputCls} mt-1 mb-4`} />
-      <button data-testid="po-submit" onClick={submit} className="btn-neon w-full py-2.5 rounded-lg text-xs uppercase">Create PO</button>
-    </Modal>
-  );
-}
-
-function StocktakeTab({ stocktake, onChanged }) {
-  const [counts, setCounts] = useState({});
-  const [report, setReport] = useState(null);
-  const session = stocktake?.session;
-  const lines = stocktake?.lines || [];
-  const countedCount = Object.keys(session?.counts || {}).length;
-
-  const start = async () => {
-    try { await api.post("/inventory/stocktake/start"); setReport(null); toast.success("Stocktake session started"); onChanged(); }
-    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
-  const saveCount = async (line) => {
-    const raw = counts[line.item_id] ?? line.counted;
-    const v = parseFloat(raw);
-    if (isNaN(v) || v < 0) return toast.error("Enter the counted quantity");
-    await api.post("/inventory/stocktake/count", { item_id: line.item_id, counted: v });
-    toast.success(`${line.name}: ${v} ${line.unit_symbol || ""}`); onChanged();
-  };
-  const close = async () => {
-    if (!confirm(`Close stocktake and apply ${countedCount} correction(s)? Stock is set to counted values.`)) return;
-    const r = await api.post("/inventory/stocktake/close");
-    setReport(r.data.report); toast.success("Stocktake closed — corrections applied"); onChanged();
-  };
-  const cancelS = async () => {
-    if (!confirm("Cancel this session? Counts are discarded.")) return;
-    await api.post("/inventory/stocktake/cancel"); onChanged();
-  };
-
-  if (report) return (
-    <div data-testid="stocktake-report">
-      <div className="flex items-center gap-3 mb-3">
-        <h3 className="font-display font-bold text-lg">Variance report</h3>
-        <button data-testid="btn-dismiss-report" onClick={() => setReport(null)} className="ml-auto py-1.5 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)]">Dismiss</button>
-      </div>
-      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
-            <tr><th className="text-left px-4 py-2">Item</th><th className="text-right px-4 py-2">Expected</th><th className="text-right px-4 py-2">Counted</th><th className="text-right px-4 py-2">Variance</th><th className="text-right px-4 py-2">Value</th></tr>
-          </thead>
-          <tbody>
-            {report.map((r) => (
-              <tr key={r.item_id} data-testid={`variance-${r.name}`} className="border-t border-[var(--border)]">
-                <td className="px-4 py-2 font-semibold text-white">{r.name}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{r.expected} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{r.counted} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.variance < 0 ? "#F43F5E" : r.variance > 0 ? "#10B981" : "#94A3B8" }}>
-                  {r.variance > 0 ? "+" : ""}{r.variance} {r.unit_symbol}
-                </td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.variance_value < 0 ? "#F43F5E" : "#10B981" }}>{fmtHKD(r.variance_value)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-
-  if (!session) return (
-    <div className="p-10 rounded-xl border border-dashed border-[var(--border)] text-center">
-      <ClipboardCheck size={28} className="mx-auto text-[var(--cyan)] mb-3" />
-      <div className="text-[var(--muted)] text-sm mb-4">Start a stocktake to snapshot expected stock, walk the shelves, enter counts, then close to apply corrections with a variance report.</div>
-      <button data-testid="btn-start-stocktake" onClick={start} className="btn-neon px-6 py-2.5 rounded-lg text-xs uppercase">Start Stocktake</button>
-    </div>
-  );
-
-  return (
-    <div>
-      <div className="flex items-center gap-3 mb-3">
-        <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-[var(--amber)]/20 text-[var(--amber)] font-black">session open</span>
-        <span className="text-xs font-mono text-[var(--muted)]">started {(session.started_at || "").slice(5, 16).replace("T", " ")} by {session.started_by} · {countedCount}/{lines.length} counted</span>
-        <div className="ml-auto flex gap-2">
-          <button data-testid="btn-cancel-stocktake" onClick={cancelS} className="py-1.5 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--muted)]">Cancel</button>
-          <button data-testid="btn-close-stocktake" onClick={close} className="btn-neon px-4 py-1.5 rounded-lg text-[10px] uppercase">Close & Apply</button>
-        </div>
-      </div>
-      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-        <table className="w-full text-sm" data-testid="stocktake-table">
-          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
-            <tr><th className="text-left px-4 py-2">Item</th><th className="text-right px-4 py-2">Expected</th><th className="text-right px-4 py-2">Counted</th><th className="px-4 py-2"></th></tr>
-          </thead>
-          <tbody>
-            {lines.map((l) => (
-              <tr key={l.item_id} data-testid={`stocktake-row-${l.name}`} className="border-t border-[var(--border)] hover:bg-[var(--surface)]">
-                <td className="px-4 py-2 font-semibold text-white">{l.name}<span className="ml-2 text-[10px] font-mono text-[var(--muted)]">{l.category}</span></td>
-                <td className="px-4 py-2 text-right font-mono text-xs text-[var(--muted)]">{l.expected} {l.unit_symbol}</td>
-                <td className="px-4 py-2 text-right">
-                  <input data-testid={`stocktake-count-${l.item_id}`} type="number" min="0" step="any"
-                    value={counts[l.item_id] ?? (l.counted ?? "")}
-                    onChange={(e) => setCounts((p) => ({ ...p, [l.item_id]: e.target.value }))}
-                    placeholder={String(l.expected)}
-                    className="w-28 px-2 py-1 rounded bg-[var(--surface-2)] border border-[var(--border)] text-right font-mono text-xs outline-none focus:border-[var(--cyan)]" />
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <button data-testid={`stocktake-save-${l.item_id}`} onClick={() => saveCount(l)}
-                    className="py-1 px-2 rounded bg-[var(--cyan)]/10 border border-[var(--cyan)]/40 text-[10px] font-mono uppercase text-[var(--cyan)]">Save</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function AnalyticsTab({ analytics }) {
-  if (!analytics) return null;
-  return (
-    <div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <Kpi label={`Usage value (${analytics.days}d)`} value={fmtHKD(analytics.totals.usage_value)} color="#00F2FE" testid="an-usage" />
-        <Kpi label={`Waste + breakage (${analytics.days}d)`} value={fmtHKD(analytics.totals.waste_value)} color="#F43F5E" testid="an-waste" />
-        <Kpi label="Restock events" value={analytics.totals.restock_count} color="#10B981" testid="an-restocks" />
-      </div>
-      <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-        <table className="w-full text-sm" data-testid="analytics-table">
-          <thead className="bg-[var(--surface-2)] text-[10px] font-mono uppercase text-[var(--muted)]">
-            <tr>
-              <th className="text-left px-4 py-2">Item</th><th className="text-right px-4 py-2">Sold</th>
-              <th className="text-right px-4 py-2">Wasted</th><th className="text-right px-4 py-2">Usage value</th>
-              <th className="text-right px-4 py-2">Waste value</th><th className="text-right px-4 py-2">Days of stock</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analytics.rows.map((r) => (
-              <tr key={r.item_id} data-testid={`analytics-row-${r.name}`} className="border-t border-[var(--border)] hover:bg-[var(--surface)]">
-                <td className="px-4 py-2 font-semibold text-white">{r.name}<span className="ml-2 text-[10px] font-mono text-[var(--muted)]">{r.category}</span></td>
-                <td className="px-4 py-2 text-right font-mono text-xs">{r.sold} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.waste > 0 ? "#F43F5E" : "#94A3B8" }}>{r.waste} {r.unit_symbol}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs text-[var(--cyan)]">{fmtHKD(r.usage_value)}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.waste_value > 0 ? "#F43F5E" : "#94A3B8" }}>{fmtHKD(r.waste_value)}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs" style={{ color: r.days_of_stock !== null && r.days_of_stock < 7 ? "#FFB800" : "#94A3B8" }}>
-                  {r.days_of_stock === null ? "—" : `${r.days_of_stock}d`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}

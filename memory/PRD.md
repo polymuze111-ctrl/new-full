@@ -3,56 +3,54 @@
 ## Original Problem Statement
 Advanced restaurant POS for a Hong Kong bar/restaurant running 11am–6am, 7 days a week. Dine-in / pick-up / delivery. Happy hours, cash & % discounts, automatic 10% service charge. Two areas (Backroom, Main+Terrace) with a full floorplan. Staff with different roles/permissions, member CRM, product categories, variants & modifiers, hold-and-fire courses. Must feel like Lightspeed Restaurant POS but better.
 
-## Current Iteration Request (Sep 2026)
-"i miss inventory tracking, input, edit · inventory parameters, elements to help tracking, measurement units database · full research, analysis first · full detailed code checker and fixing agent"
-- Source: cloned https://github.com/bellybeeroperations-png/posrepotry into this environment
-- User choices: product stock + ingredient recipes · predefined + custom units (ml, cl, l, g, kg, bottle, glass, unit, keg, pour, pint, half pint, piece, part, cup) · one-time audit + ongoing checker pipeline · auto-deduct on payment + manual adjustments with reasons · variant auto-scale (option a)
-
 ## Architecture
 - Frontend: React 19 + TailwindCSS + shadcn/ui + Recharts + sonner
-- Backend: FastAPI + Motor (MongoDB async), JWT (PyJWT) + bcrypt
-- DB: MongoDB `test_database` (env DB_NAME) — collections incl. users, areas, tables, categories, products, orders, members, happy_hours, kegs, keg_pours, combos, vouchers, upsell_nudges, **units, inventory_items, inventory_movements, recipes**
+- Backend: FastAPI + Motor (MongoDB async), JWT (PyJWT) + bcrypt — **auth via httpOnly cookie only** (no JS-readable tokens)
+- DB: MongoDB `test_database` (env DB_NAME)
 - Theme: Hong Kong neon cyberpunk dark mode (`#0B0E14` bg, `#00F2FE` cyan, `#FFB800` amber)
+- Code checker: `bash /app/scripts/code_check.sh` — flake8 + isort + black + mypy + pytest (serial, fresh DB reseed). `--fix` for auto-format.
+
+## What's Implemented (v25 · Sep 2026 — Code-quality report fixes)
+- **Security (critical)**: auth token removed from localStorage entirely — httpOnly `access_token` cookie only; api.js interceptor deleted; AuthContext rehydrates via `/auth/me` with `withCredentials`. Backend already set/cleared the cookie on login/pin-login/logout.
+- **Hook stale-closure fixes**: Loyalty `load` wrapped in useCallback with correct deps; Register + QuickBar happy-hour logic deduped into `src/hooks/useHappyHour.js`; Register's 85-line totals memo extracted to pure `src/lib/orderTotals.js::computeOrderTotals` (unit-testable, referentially stable).
+- **Complex backend functions refactored** (behavior-preserving): `on_payment_earn` (complexity 41 → orchestrator + 8 helpers: tier points, stamps, promo, scratch, birthday, HH boost, streak, referral); `push_send` (→ `_twilio_client`, `_compose_push_message`, `_deliver_push`); `deduct_inventory_for_order` (→ `_compute_order_deltas` + `_apply_inventory_deltas`); `inventory_analytics` (→ `_aggregate_movement_totals` + `_analytics_row`); `prep_view` (→ `_aggregate_prep`).
+- **Component splits**: Floorplan 488→336 lines (sections → `components/pos/floorplan/FloorplanSections.jsx`); Inventory ~950→596 lines (tabs/modals → `components/inventory/{common,PurchaseOrders,Stocktake,Analytics}.jsx`); Register 375→268 lines.
+- **Stable list keys**: recipe chips keyed by item_id; recipe/PO editor rows use `crypto.randomUUID()` uids (deleting a middle row no longer scrambles inputs).
+- **Inline chart objects → module constants**: Reports (TOOLTIP_STYLE, BAR_RADIUS_TOP/RIGHT), Kegs (TOOLTIP_STYLE, DOT_STYLE), PreauthModal (CARD_ELEMENT_OPTIONS, useMemo elementsOptions).
+- **Test hygiene**: 26× `is True/is False` → `==` across backend tests.
+- Verified: ALL CHECKS PASSED (flake8/isort/black/mypy clean, 143/143 pytest), UI screenshots confirm cookie login persists across reload, all split pages render.
 
 ## What's Implemented (v24 · Sep 2026 — P0/P1 backlog iteration)
-- **Auto-86**: `_sync_86_flag()` in inventory router — a recipe-linked product is 86'd the moment any ingredient (or direct item) hits zero stock, and un-86'd on restock. Runs after every deduction, adjustment, PO receive and stocktake close. Adjust endpoint normalises qty sign by reason (waste/breakage always subtract).
-- **Purchase orders / receiving**: `purchase_orders` collection + CRUD (`/api/inventory/purchase-orders`), receive flow restocks all lines (purchase→base unit conversion) with PO-referenced restock movements; double-receive blocked; manager-only writes.
-- **Stocktake sessions**: `stocktakes` collection — start (snapshots expected stock), per-item counts (any staff), close applies corrections as stocktake movements + returns variance report with HKD values; cancel + history endpoints.
-- **Inventory analytics** (`/api/inventory/analytics?days=30`): per-item sold/waste/restocked (usage units), usage + waste value in HKD, days-of-stock estimate; totals row.
-- **Keg↔inventory bridge**: kegs get optional `inventory_item_id`; seeded "Tsingtao/Asahi/Moonzen Draught" items (purchase unit keg) mirror on-tap keg volume — pours deduct ml from the item, keg install restocks it. Kegs page shows ⇄ link badge and auto-links "<beer> Draught" on Add Keg.
-- **Frontend**: Inventory page now 8 tabs (Stock, Items, Recipes, Units, Purchases, Stocktake, Analytics, Movements); PO modal, stocktake count grid + variance report, analytics table.
-- **GitHub push**: BLOCKED — no credentials in pod (no gh CLI, no SSH key, no token). Repo remote added as `origin`; needs a GitHub PAT with repo write to push.
+- **Auto-86**: `_sync_86_flag()` — recipe-linked products 86'd at zero stock, un-86'd on restock; runs after every deduction/adjustment/PO receive/stocktake close. Adjust endpoint normalises qty sign by reason.
+- **Purchase orders / receiving**: `purchase_orders` collection + Purchases tab; receive restocks all lines with PO-referenced movements; double-receive blocked.
+- **Stocktake sessions**: start → count → close with HKD variance report; cancel + history.
+- **Inventory analytics**: per-item sold/waste/restocked, usage+waste value, days-of-stock (30d window).
+- **Keg↔inventory bridge**: kegs link to draught items (Tsingtao/Asahi/Moonzen Draught); pours deduct, installs restock; ⇄ badge on Kegs page.
 
 ## What's Implemented (v23 · Sep 2026 — Inventory + Code-Checker iteration)
-- **Environment restore**: cloned full repo into this pod; added missing JWT_SECRET + ADMIN_* env vars; login verified (polymuze111@gmail.com / admin123)
-- **Code audit & fixes (one-time)**: autoflake (10 unused imports), isort+black (25 files), E741 `l`→`line` renames (server/kegs/orders), E701 one-liners split, mypy 58→0 errors (serialize Optional, dict annotations, stripe pm guard, loyalty week-parse cleanup)
-- **Real bug found & fixed**: `PreauthModal.jsx` had a stale duplicated return block → whole frontend failed to compile ("return outside of function"). Truncated stray lines; app compiles again.
-- **Real bug found & fixed**: stale test `test_iter25_loyalty.py::test_summary_structure` assumed empty voucher wallet, broken by iter27 signup voucher — assertion now checks all vouchers are `source=signup`.
-- **Ongoing checker**: `scripts/code_check.sh` (flake8 + isort + black + mypy + pytest serial), `--fix` mode for auto-format. Config: `backend/setup.cfg` (flake8), `backend/mypy.ini`. pytest runs `-n 0` (serial) — suite assumes shared sequential state.
-- **Measurement units DB** (`/api/inventory/units`): 15 seeded units across volume (ml base), mass (g base), count (unit base) with factor_to_base conversions; full CRUD, manager-only writes, duplicate-symbol guard, delete blocked when in use, custom units supported.
-- **Inventory items & stock** (`/api/inventory/items`): name/SKU/category/supplier, purchase unit vs usage unit, cost per purchase unit, par + reorder levels, opening stock; computed stock in usage units, stock value, low/out-of-stock flags. 12 demo items seeded.
-- **Manual adjustments with reasons** (`POST /items/{id}/adjust`): restock / waste / breakage / correction / stocktake (absolute count); every change logged to `inventory_movements` with before→after, user, note. Movements ledger endpoint with per-item filter.
-- **Recipes + auto-deduction** (`/api/inventory/recipes`, upsert by product): ingredient lines (item + qty + any unit, auto-converted to base) OR direct-item sell-as-is mode; `variant_multipliers` auto-scale (Double ×2). Hooked into payment via `decrement_kegs_for_order` → `deduct_inventory_for_order` (best-effort, never blocks payment). 6 recipes seeded (4 cocktails with Double ×2, fries, wings).
-- **Frontend `/inventory` page** (nav "Stock"): 5 tabs — Stock (KPI cards, per-item adjust/edit), Items (table CRUD), Recipes (per-product editor with lines + variant multipliers + direct mode), Units (CRUD + conversion display), Movements (audit ledger with reason badges).
-- **Verified via curl E2E**: 2× Old Fashioned paid → Bourbon −100ml with sale movement; waste −200ml; stocktake to absolute 6800ml; custom unit "crate" (7920ml) created; server role gets 403 on item create. Backend suite 114/115 → 115/115 after stale-test fix.
+- Environment restore from GitHub clone; missing JWT_SECRET/ADMIN_* env vars added
+- One-time audit: ~100 lint/format/type issues fixed (mypy 58→0); real bugs fixed: PreauthModal.jsx broken build, stale loyalty test
+- `scripts/code_check.sh` pipeline + setup.cfg + mypy.ini
+- Measurement units DB (15 seeded units, ml/g/unit bases, custom units + conversions)
+- Inventory items CRUD, manual adjustments with reasons + movement ledger
+- Recipes with variant multipliers + pay-time auto-deduction; `/inventory` page (8 tabs)
 
 ## Test Credentials
 See /app/memory/test_credentials.md — admin polymuze111@gmail.com / admin123 (PIN 9999); staff PINs 1111–4444.
 
 ## Prioritized Backlog
-### P0 (next iteration)
-- Push the fixed repo back to GitHub — BLOCKED on credentials (needs a PAT with repo write; remote `origin` already configured)
-- In-app confirm modal to replace window.confirm in stocktake close (blocks some e2e drivers)
+### P0
+- Push fixed repo to GitHub — BLOCKED on credentials (needs PAT with repo write; remote `origin` configured)
 ### P1
-- Extend keg↔item links to Asahi/Moonzen taps when those kegs go on-tap (bridge ready, just needs linking)
-- Purchase-order receive warning when a line item lacks a purchase unit (currently skipped silently)
-- Inventory variance trends report (stocktake history comparison)
+- In-app confirm modal replacing window.confirm (stocktake close, PO receive)
+- PO receive warning when a line item lacks a purchase unit
+- Link Asahi/Moonzen kegs when those taps go live
+- Stocktake variance trend report
 ### P2
-- Multi-venue stock transfer, barcode scanning, supplier price history
-- Frontend lint pipeline (eslint) added to code_check.sh
-- Batch _sync_86_flag if recipe catalog grows large
+- Multi-venue transfers, barcode scanning, supplier price history
+- eslint react-hooks pipeline for frontend in code_check.sh
+- Batch _sync_86_flag if catalog grows
 
 ## Next Tasks
-1. User provides GitHub PAT (or pushes manually) to sync fixed code to bellybeeroperations-png/posrepotry
-2. User reviews Purchases/Stocktake/Analytics tabs UX
-3. P0/P1 items on request
+1. User provides GitHub PAT (or pushes manually) to sync code
+2. P0/P1 items on request

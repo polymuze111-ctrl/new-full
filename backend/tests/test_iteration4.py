@@ -38,8 +38,8 @@ class TestPublicMenu:
         # No _id in serialized docs
         for p in data["products"]:
             assert "_id" not in p
-            assert p.get("active", True) is True
-            assert p.get("eightysix", False) is False
+            assert p.get("active", True) == True
+            assert p.get("eightysix", False) == False
 
     def test_public_menu_404(self):
         r = requests.get(f"{BASE_URL}/api/public/menu/507f1f77bcf86cd799439011")
@@ -74,7 +74,7 @@ class TestPinVerify:
         )
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["valid"] is True
+        assert d["valid"] == True
         assert d["role"] == "manager"
         assert d["name"]
         assert isinstance(d["user_id"], str)

@@ -33,7 +33,9 @@ def admin_h():
 
 
 def _get_item(admin_h, name):
-    items = requests.get(f"{BASE}/api/inventory/items", headers=admin_h, timeout=20).json()
+    items = requests.get(
+        f"{BASE}/api/inventory/items", headers=admin_h, timeout=20
+    ).json()
     return next((i for i in items if i["name"] == name), None)
 
 
@@ -63,11 +65,15 @@ class TestAuto86:
         assert r.status_code == 200, r.text
         # sign normalisation → delta must be negative
         assert r.json()["stock"] <= 0.01, f"stock still {r.json()['stock']}"
-        assert r.json()["movement"]["delta_base"] < 0, "waste must produce negative movement"
+        assert (
+            r.json()["movement"]["delta_base"] < 0
+        ), "waste must produce negative movement"
 
         time.sleep(0.3)
         of2 = _get_product(admin_h, "Old Fashioned")
-        assert of2.get("is_86d") is True, "Old Fashioned should auto-86 with zero Angostura"
+        assert (
+            of2.get("is_86d") == True
+        ), "Old Fashioned should auto-86 with zero Angostura"
 
         # restock 700ml → un-86
         r2 = requests.post(
@@ -78,11 +84,13 @@ class TestAuto86:
         )
         assert r2.status_code == 200
         assert r2.json()["stock"] >= 700 - 0.5
-        assert r2.json()["movement"]["delta_base"] > 0, "restock must produce positive movement"
+        assert (
+            r2.json()["movement"]["delta_base"] > 0
+        ), "restock must produce positive movement"
 
         time.sleep(0.3)
         of3 = _get_product(admin_h, "Old Fashioned")
-        assert of3.get("is_86d") is False, "Old Fashioned should un-86 after restock"
+        assert of3.get("is_86d") == False, "Old Fashioned should un-86 after restock"
 
     def test_waste_negative_qty_also_subtracts(self, admin_h):
         """Both positive and negative qty with reason=waste should subtract (sign normalisation)."""
@@ -129,7 +137,9 @@ class TestPurchaseOrders:
         assert po["status"] == "open"
 
         # list — total should be 685
-        lst = requests.get(f"{BASE}/api/inventory/purchase-orders", headers=admin_h, timeout=20).json()
+        lst = requests.get(
+            f"{BASE}/api/inventory/purchase-orders", headers=admin_h, timeout=20
+        ).json()
         mine = next((p for p in lst if p["id"] == pid), None)
         assert mine, "created PO missing from list"
         assert abs(mine["total_cost"] - 685.0) < 0.01, f"total={mine['total_cost']}"
@@ -145,15 +155,25 @@ class TestPurchaseOrders:
 
         # bourbon: 2 bottles × 700ml (purchase-unit factor) = +1400ml
         b_after = _get_item(admin_h, "Bourbon Whiskey")["stock"]
-        assert abs((b_after - bourbon_before) - 1400) < 1.0, f"bourbon delta {b_after - bourbon_before}"
+        assert (
+            abs((b_after - bourbon_before) - 1400) < 1.0
+        ), f"bourbon delta {b_after - bourbon_before}"
         # lime: 1 l = +1000ml
         l_after = _get_item(admin_h, "Lime Juice")["stock"]
-        assert abs((l_after - lime_before) - 1000) < 1.0, f"lime delta {l_after - lime_before}"
+        assert (
+            abs((l_after - lime_before) - 1000) < 1.0
+        ), f"lime delta {l_after - lime_before}"
 
         # movements: restock with note PO #...
-        m = requests.get(f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20).json()
-        po_moves = [x for x in m if "PO #" in (x.get("note") or "") and x["reason"] == "restock"]
-        assert len(po_moves) >= 2, f"expected 2 PO restock movements, got {len(po_moves)}"
+        m = requests.get(
+            f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20
+        ).json()
+        po_moves = [
+            x for x in m if "PO #" in (x.get("note") or "") and x["reason"] == "restock"
+        ]
+        assert (
+            len(po_moves) >= 2
+        ), f"expected 2 PO restock movements, got {len(po_moves)}"
 
         # second receive → 400
         rcv2 = requests.post(
@@ -208,21 +228,31 @@ class TestPurchaseOrders:
 class TestStocktakeSession:
     def test_full_flow(self, admin_h):
         # Ensure nothing open (from a prior partial run)
-        cur = requests.get(f"{BASE}/api/inventory/stocktake/current", headers=admin_h, timeout=20).json()
+        cur = requests.get(
+            f"{BASE}/api/inventory/stocktake/current", headers=admin_h, timeout=20
+        ).json()
         if cur:
-            requests.post(f"{BASE}/api/inventory/stocktake/cancel", headers=admin_h, timeout=20)
+            requests.post(
+                f"{BASE}/api/inventory/stocktake/cancel", headers=admin_h, timeout=20
+            )
 
         # start
-        s = requests.post(f"{BASE}/api/inventory/stocktake/start", headers=admin_h, timeout=20)
+        s = requests.post(
+            f"{BASE}/api/inventory/stocktake/start", headers=admin_h, timeout=20
+        )
         assert s.status_code == 200, s.text
         assert s.json()["status"] == "open"
 
         # cannot start a second
-        s2 = requests.post(f"{BASE}/api/inventory/stocktake/start", headers=admin_h, timeout=20)
+        s2 = requests.post(
+            f"{BASE}/api/inventory/stocktake/start", headers=admin_h, timeout=20
+        )
         assert s2.status_code == 400
 
         # current — expected present, counted None
-        cur = requests.get(f"{BASE}/api/inventory/stocktake/current", headers=admin_h, timeout=20).json()
+        cur = requests.get(
+            f"{BASE}/api/inventory/stocktake/current", headers=admin_h, timeout=20
+        ).json()
         assert cur and "lines" in cur and len(cur["lines"]) > 0
         assert "expected" in cur["lines"][0]
 
@@ -232,8 +262,8 @@ class TestStocktakeSession:
         lime_expected = lime["stock"]
         fries_expected = fries["stock"]
 
-        lime_counted = lime_expected - 50    # 50ml short → negative variance
-        fries_counted = fries_expected + 200 # +200g over → positive variance
+        lime_counted = lime_expected - 50  # 50ml short → negative variance
+        fries_counted = fries_expected + 200  # +200g over → positive variance
 
         for iid, counted in [(lime["id"], lime_counted), (fries["id"], fries_counted)]:
             c = requests.post(
@@ -245,12 +275,16 @@ class TestStocktakeSession:
             assert c.status_code == 200
 
         # close
-        close = requests.post(f"{BASE}/api/inventory/stocktake/close", headers=admin_h, timeout=20)
+        close = requests.post(
+            f"{BASE}/api/inventory/stocktake/close", headers=admin_h, timeout=20
+        )
         assert close.status_code == 200, close.text
         rpt = close.json()["report"]
         assert isinstance(rpt, list) and len(rpt) >= 2
         for row in rpt:
-            assert set(("item_id", "name", "expected", "counted", "variance", "variance_value")) <= set(row.keys())
+            assert set(
+                ("item_id", "name", "expected", "counted", "variance", "variance_value")
+            ) <= set(row.keys())
 
         # stock now reflects counted values
         lime_after = _get_item(admin_h, "Lime Juice")["stock"]
@@ -259,7 +293,9 @@ class TestStocktakeSession:
         assert abs(fries_after - fries_counted) < 0.5
 
         # movements: stocktake reason present
-        m = requests.get(f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20).json()
+        m = requests.get(
+            f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20
+        ).json()
         st_moves = [x for x in m if x["reason"] == "stocktake"]
         assert len(st_moves) >= 2
 
@@ -275,7 +311,15 @@ class TestAnalytics:
         assert "rows" in data and "totals" in data and "days" in data
         assert isinstance(data["rows"], list) and len(data["rows"]) > 0
         row0 = data["rows"][0]
-        for k in ("item_id", "name", "sold", "waste", "usage_value", "waste_value", "days_of_stock"):
+        for k in (
+            "item_id",
+            "name",
+            "sold",
+            "waste",
+            "usage_value",
+            "waste_value",
+            "days_of_stock",
+        ):
             assert k in row0
         for k in ("usage_value", "waste_value", "restock_count"):
             assert k in data["totals"]
@@ -299,16 +343,33 @@ class TestKegInventoryBridge:
     def test_kegs_linked(self, admin_h):
         kegs = _get_kegs(admin_h)
         # find Tsingtao on-tap keg
-        tsing = next((k for k in kegs if (k.get("product") or {}).get("name") == "Tsingtao" and k.get("status") == "on"), None)
+        tsing = next(
+            (
+                k
+                for k in kegs
+                if (k.get("product") or {}).get("name") == "Tsingtao"
+                and k.get("status") == "on"
+            ),
+            None,
+        )
         assert tsing, "No on-tap Tsingtao keg to test"
-        assert tsing.get("inventory_item_id"), "Tsingtao keg missing inventory_item_id link"
+        assert tsing.get(
+            "inventory_item_id"
+        ), "Tsingtao keg missing inventory_item_id link"
 
     def test_pour_deducts_and_install_restocks(self, admin_h):
         # find Tsingtao product + on-tap keg
         prod = _get_product(admin_h, "Tsingtao")
         assert prod, "Tsingtao product missing"
         kegs = _get_kegs(admin_h)
-        tsing_keg = next((k for k in kegs if k.get("product_id") == prod["id"] and k.get("status") == "on"), None)
+        tsing_keg = next(
+            (
+                k
+                for k in kegs
+                if k.get("product_id") == prod["id"] and k.get("status") == "on"
+            ),
+            None,
+        )
         assert tsing_keg, "No on-tap Tsingtao keg"
         item = _get_item(admin_h, "Tsingtao Draught")
         assert item
@@ -342,26 +403,47 @@ class TestKegInventoryBridge:
 
         item_after = _get_item(admin_h, "Tsingtao Draught")["stock"]
         delta = round(item_before - item_after, 3)
-        assert abs(delta - 568.0) < 1.0, f"Tsingtao draught delta {delta}ml (expected 568)"
+        assert (
+            abs(delta - 568.0) < 1.0
+        ), f"Tsingtao draught delta {delta}ml (expected 568)"
 
         # movement should have reason=sale, order_id
-        m = requests.get(f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20).json()
-        sale = next((x for x in m if x["item_name"] == "Tsingtao Draught" and x.get("order_id") == oid), None)
+        m = requests.get(
+            f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20
+        ).json()
+        sale = next(
+            (
+                x
+                for x in m
+                if x["item_name"] == "Tsingtao Draught" and x.get("order_id") == oid
+            ),
+            None,
+        )
         assert sale, "no sale movement for draught pour"
         assert sale["reason"] == "sale"
 
         # install new keg → +30000ml, reason=restock, note contains 'installed'
         item_pre_install = _get_item(admin_h, "Tsingtao Draught")["stock"]
-        inst = requests.post(f"{BASE}/api/kegs/{tsing_keg['id']}/new", headers=admin_h, timeout=20)
+        inst = requests.post(
+            f"{BASE}/api/kegs/{tsing_keg['id']}/new", headers=admin_h, timeout=20
+        )
         assert inst.status_code == 200
         time.sleep(0.4)
         item_post_install = _get_item(admin_h, "Tsingtao Draught")["stock"]
-        assert abs((item_post_install - item_pre_install) - 30000) < 1.0, (
-            f"install delta {item_post_install - item_pre_install} (expected 30000)"
-        )
-        m2 = requests.get(f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20).json()
+        assert (
+            abs((item_post_install - item_pre_install) - 30000) < 1.0
+        ), f"install delta {item_post_install - item_pre_install} (expected 30000)"
+        m2 = requests.get(
+            f"{BASE}/api/inventory/movements?limit=50", headers=admin_h, timeout=20
+        ).json()
         inst_mv = next(
-            (x for x in m2 if x["item_name"] == "Tsingtao Draught" and x["reason"] == "restock" and "install" in (x.get("note") or "").lower()),
+            (
+                x
+                for x in m2
+                if x["item_name"] == "Tsingtao Draught"
+                and x["reason"] == "restock"
+                and "install" in (x.get("note") or "").lower()
+            ),
             None,
         )
         assert inst_mv, "no restock movement for keg install"

@@ -9,12 +9,8 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach bearer token as fallback (cookies work but bearer helps in some hosted previews)
-api.interceptors.request.use((config) => {
-  const t = localStorage.getItem("hkbar_token");
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  return config;
-});
+// Auth travels via the httpOnly access_token cookie set by /auth/login —
+// no token is ever readable from JS (XSS-safe). withCredentials sends it.
 
 export const fmtHKD = (v) =>
   new Intl.NumberFormat("en-HK", {

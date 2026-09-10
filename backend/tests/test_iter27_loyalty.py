@@ -127,7 +127,7 @@ def test_referral_first_order_bonus(client, tag):
 
         s1 = _get_summary(client, m1["id"])
         s2 = _get_summary(client, m2["id"])
-        assert s2["member"].get("referral_awarded") is True
+        assert s2["member"].get("referral_awarded") == True
         assert (
             s2["points"] >= pts_m2_before + 200
         ), f"M2 points {s2['points']} vs before {pts_m2_before}"

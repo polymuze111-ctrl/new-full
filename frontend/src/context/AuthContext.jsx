@@ -10,13 +10,10 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const t = localStorage.getItem("hkbar_token");
-        if (!t) return setLoading(false);
-        const { data } = await api.get("/auth/me");
+        const { data } = await api.get("/auth/me"); // session via httpOnly cookie
         setUser(data);
-      } catch (err) {
-        console.error("[auth/me] refresh failed, clearing token:", err);
-        localStorage.removeItem("hkbar_token");
+      } catch {
+        setUser(null); // no/expired cookie — show login
       } finally {
         setLoading(false);
       }
@@ -25,14 +22,12 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
-    localStorage.setItem("hkbar_token", data.token);
-    setUser(data.user);
+    setUser(data.user); // token lives only in the httpOnly cookie
     return data.user;
   }, []);
 
   const pinLogin = useCallback(async (pin) => {
     const { data } = await api.post("/auth/pin-login", { pin });
-    localStorage.setItem("hkbar_token", data.token);
     setUser(data.user);
     return data.user;
   }, []);
@@ -44,7 +39,6 @@ export function AuthProvider({ children }) {
       // Non-blocking — server may be offline; we still clear local state below.
       console.warn("[auth/logout] server call failed:", err);
     }
-    localStorage.removeItem("hkbar_token");
     setUser(null);
   }, []);
 

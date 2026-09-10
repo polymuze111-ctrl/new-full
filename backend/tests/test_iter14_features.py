@@ -186,7 +186,7 @@ def test_auto_close_admin_closes_all_open(admin_sess, products):
         assert r.status_code == 200
         o = r.json()
         assert o["status"] == "paid"
-        assert o.get("payment", {}).get("auto_closed") is True
+        assert o.get("payment", {}).get("auto_closed") == True
 
 
 # ---------- Merge ----------

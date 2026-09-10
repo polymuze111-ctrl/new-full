@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { X, CreditCard, User as UserIcon, Users } from "lucide-react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+
+const CARD_ELEMENT_OPTIONS = { style: { base: { color: "#FFF", "::placeholder": { color: "#94A3B8" } } } };
 
 export default function PreauthModal({ table, onClose, onOpened }) {
   const [name, setName] = useState("");
@@ -14,6 +16,10 @@ export default function PreauthModal({ table, onClose, onOpened }) {
   const [stripe, setStripe] = useState({ intent: null, promise: null });
 
   const canOpen = name.trim() && /^\d{4}$/.test(last4);
+  const elementsOptions = useMemo(
+    () => ({ clientSecret: stripe.intent?.client_secret }),
+    [stripe.intent?.client_secret]
+  );
 
   const createStripeHold = async () => {
     setBusy(true);
@@ -80,7 +86,7 @@ export default function PreauthModal({ table, onClose, onOpened }) {
           </div>
 
           {stripe.intent && stripe.promise && (
-            <Elements stripe={stripe.promise} options={{ clientSecret: stripe.intent.client_secret }}>
+            <Elements stripe={stripe.promise} options={elementsOptions}>
               <StripeCardForm
                 clientSecret={stripe.intent.client_secret}
                 intentId={stripe.intent.setup_intent_id}
@@ -137,7 +143,7 @@ function StripeCardForm({ clientSecret, intentId, onSuccess }) {
     <div className="p-3 rounded-lg border border-[var(--cyan)]/40 bg-[var(--surface-2)]">
       <div className="text-[10px] font-mono uppercase text-[var(--muted)] mb-2">Card details (Stripe Elements · test-mode)</div>
       <div className="p-2 rounded bg-[var(--surface)] border border-[var(--border)]" data-testid="stripe-card-element">
-        <CardElement options={{ style: { base: { color: "#FFF", "::placeholder": { color: "#94A3B8" } } } }} />
+        <CardElement options={CARD_ELEMENT_OPTIONS} />
       </div>
       <button data-testid="stripe-confirm" onClick={submit} disabled={busy}
         className="mt-2 w-full py-2 rounded btn-neon text-xs font-mono uppercase disabled:opacity-40">

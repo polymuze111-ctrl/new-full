@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api, fmtHKD } from "@/lib/api";
 import { toast } from "sonner";
 import { Trophy, Search, Sparkles, Gift, Ticket, Zap, Star, Award, Crown } from "lucide-react";
@@ -19,8 +19,8 @@ export default function Loyalty() {
     api.get("/members", { params: { q } }).then((r) => setMembers(r.data.slice(0, 8)));
   }, [q]);
 
-  const load = (mid) => api.get(`/loyalty/summary/${mid}`).then((r) => setSum(r.data));
-  useEffect(() => { if (selId) load(selId); }, [selId]);
+  const load = useCallback((mid) => api.get(`/loyalty/summary/${mid}`).then((r) => setSum(r.data)), []);
+  useEffect(() => { if (selId) load(selId); }, [selId, load]);
 
   const spin = async () => {
     if (!sum?.can_spin) return toast.error("Come back tomorrow — one spin per day");

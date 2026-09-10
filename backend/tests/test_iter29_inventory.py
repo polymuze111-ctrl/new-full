@@ -66,7 +66,7 @@ class TestUnits:
         assert r.status_code == 200, r.text
         uid = r.json()["id"]
         assert r.json()["symbol"] == "test_case12"
-        assert r.json()["custom"] is True
+        assert r.json()["custom"] == True
         # duplicate symbol -> 400
         r2 = requests.post(
             f"{BASE}/api/inventory/units", json=payload, headers=admin_h, timeout=20

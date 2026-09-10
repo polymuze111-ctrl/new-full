@@ -299,19 +299,10 @@ async def get_tiers(user: dict = Depends(get_current_user)):
 
 
 # --------- Auto-hook invoked from orders.pay_order ---------
-async def on_payment_earn(member_doc: dict, order_doc: dict):
-    """Called after a paid order attaches to a member.
-    - Adds tier-multiplied points (on top of the base int(total//10) from orders)
-    - Increments stamps; issues stamp-card voucher every 10 visits
-    - 20% chance issues a scratch ticket
-    - Once/year birthday voucher if today's month matches member.birth_month
-    Returns dict of things awarded (for the receipt / toast)."""
-    awards = []
-    spend = member_doc.get("lifetime_spend", 0)
-    tier = tier_for(spend)
-    mult = tier["point_multiplier"]
+async def _award_tier_points(
+    member_doc: dict, base_pts: int, tier: dict, mult: float, awards: list
+):
     # Bonus points on top of the base 10-per-HK$100 already applied by orders.pay_order
-    base_pts = int(order_doc.get("total", 0) // 10)
     bonus_pts = int(base_pts * (mult - 1))
     if bonus_pts > 0:
         await db.members.update_one(
@@ -325,7 +316,9 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
             }
         )
 
-    # Stamps — Platinum earns 2× stamps
+
+async def _award_stamps(member_doc: dict, tier: dict, awards: list):
+    # Stamps — Platinum earns 2× stamps; voucher every STAMP_GOAL visits
     stamp_delta = 2 if tier["name"] == "Platinum" else 1
     new_stamps = (member_doc.get("stamps", 0) or 0) + stamp_delta
     stamp_update = {"stamps": new_stamps}
@@ -342,9 +335,8 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
         stamp_update["stamps"] = new_stamps - STAMP_GOAL  # reset with rollover
     await db.members.update_one({"_id": member_doc["_id"]}, {"$set": stamp_update})
 
-    # Tier promotion notice
-    new_spend = (spend or 0) + order_doc.get("total", 0)
-    new_tier = tier_for(new_spend)
+
+def _tier_promo_award(tier: dict, new_tier: dict, awards: list):
     if new_tier["name"] != tier["name"]:
         awards.append(
             {
@@ -354,6 +346,8 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
             }
         )
 
+
+async def _maybe_scratch_ticket(member_doc: dict, order_doc: dict, awards: list):
     # Scratch ticket drop (~20%)
     if secrets.randbelow(5) == 0:
         r = await db.scratch_tickets.insert_one(
@@ -372,6 +366,8 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
             }
         )
 
+
+async def _maybe_birthday_voucher(member_doc: dict, new_tier: dict, awards: list):
     # Birthday voucher (once per year, on match month)
     bmonth = member_doc.get("birth_month")
     if bmonth and datetime.now(timezone.utc).month == int(bmonth):
@@ -395,72 +391,79 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
             )
             awards.append({"kind": "voucher", "title": v["title"], "voucher": v})
 
+
+async def _hh_points_boost(member_doc: dict, base_pts: int, awards: list):
     # --- Happy-Hour points boost (2× base points during any active window) ---
     active_hh = await db.happy_hours.find({"active": True}).to_list(50)
-    if active_hh:
-        now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
-        cur = now.strftime("%H:%M")
-        in_window = False
-        for h in active_hh:
-            s, e = h.get("start_time"), h.get("end_time")
-            days = h.get("days") or []
-            if days and now.weekday() not in days:
-                continue
-            if not s or not e:
-                continue
-            if (s <= e and s <= cur <= e) or (s > e and (cur >= s or cur <= e)):
-                in_window = True
-                break
-        if in_window and base_pts > 0:
-            await db.members.update_one(
-                {"_id": member_doc["_id"]}, {"$inc": {"points": base_pts}}
-            )
-            awards.append(
-                {
-                    "kind": "points",
-                    "value": base_pts,
-                    "title": f"+{base_pts} HH boost (2×)",
-                }
-            )
+    if not active_hh:
+        return
+    now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+    cur = now.strftime("%H:%M")
+    in_window = False
+    for h in active_hh:
+        s, e = h.get("start_time"), h.get("end_time")
+        days = h.get("days") or []
+        if days and now.weekday() not in days:
+            continue
+        if not s or not e:
+            continue
+        if (s <= e and s <= cur <= e) or (s > e and (cur >= s or cur <= e)):
+            in_window = True
+            break
+    if in_window and base_pts > 0:
+        await db.members.update_one(
+            {"_id": member_doc["_id"]}, {"$inc": {"points": base_pts}}
+        )
+        awards.append(
+            {
+                "kind": "points",
+                "value": base_pts,
+                "title": f"+{base_pts} HH boost (2×)",
+            }
+        )
 
+
+async def _visit_streak_bonus(member_doc: dict, awards: list):
     # --- Visit-streak bonus (consecutive ISO weeks) ---
     now_hk = datetime.now(ZoneInfo("Asia/Hong_Kong"))
     iso_year, iso_week, _ = now_hk.isocalendar()
     key = f"{iso_year}-W{iso_week:02d}"
     last_wk = member_doc.get("last_visit_week")
     streak = member_doc.get("streak_weeks", 0) or 0
-    streak_award = 0
     if last_wk == key:
-        pass  # same week, no change
-    else:
-        # Was last week consecutive?
-        try:
-            ly = int((last_wk or "").split("-W")[0])
-            lw = int((last_wk or "").split("-W")[1])
-        except Exception:
-            ly, lw = None, None
-        consecutive = False
-        if ly and lw:
-            # Simple: same year & lw+1==iso_week; OR crossing year boundary at week 52/53→1
-            consecutive = (ly == iso_year and lw + 1 == iso_week) or (
-                ly == iso_year - 1 and iso_week == 1 and lw in (52, 53)
-            )
-        streak = streak + 1 if consecutive else 1
-        streak_update = {"last_visit_week": key, "streak_weeks": streak}
-        await db.members.update_one({"_id": member_doc["_id"]}, {"$set": streak_update})
-        if streak >= 2:
-            streak_award = min(500, streak * 50)
-            await db.members.update_one(
-                {"_id": member_doc["_id"]}, {"$inc": {"points": streak_award}}
-            )
-            awards.append(
-                {
-                    "kind": "points",
-                    "value": streak_award,
-                    "title": f"+{streak_award} streak bonus · {streak}-week run",
-                }
-            )
+        return  # same week, no change
+    # Was last week consecutive?
+    try:
+        ly = int((last_wk or "").split("-W")[0])
+        lw = int((last_wk or "").split("-W")[1])
+    except Exception:
+        ly, lw = None, None
+    consecutive = False
+    if ly and lw:
+        # Simple: same year & lw+1==iso_week; OR crossing year boundary at week 52/53→1
+        consecutive = (ly == iso_year and lw + 1 == iso_week) or (
+            ly == iso_year - 1 and iso_week == 1 and lw in (52, 53)
+        )
+    streak = streak + 1 if consecutive else 1
+    await db.members.update_one(
+        {"_id": member_doc["_id"]},
+        {"$set": {"last_visit_week": key, "streak_weeks": streak}},
+    )
+    if streak >= 2:
+        streak_award = min(500, streak * 50)
+        await db.members.update_one(
+            {"_id": member_doc["_id"]}, {"$inc": {"points": streak_award}}
+        )
+        awards.append(
+            {
+                "kind": "points",
+                "value": streak_award,
+                "title": f"+{streak_award} streak bonus · {streak}-week run",
+            }
+        )
 
+
+async def _referral_bonus(member_doc: dict, awards: list):
     # --- Referral first-order bonus (fires once per referred member) ---
     ref = member_doc.get("referred_by")
     if ref and not member_doc.get("referral_awarded"):
@@ -500,6 +503,29 @@ async def on_payment_earn(member_doc: dict, order_doc: dict):
         except Exception:
             pass
 
+
+async def on_payment_earn(member_doc: dict, order_doc: dict):
+    """Called after a paid order attaches to a member. Awards, in order:
+    tier-multiplied bonus points (on top of base int(total//10) from orders),
+    stamps + stamp-card voucher every 10 visits, tier-promotion notice, ~20%
+    scratch ticket, once/year birthday voucher, HH 2× points boost, visit-streak
+    bonus, referral first-order bonus. Returns list of awards (receipt/toast)."""
+    awards: list = []
+    spend = member_doc.get("lifetime_spend", 0)
+    tier = tier_for(spend)
+    mult = tier["point_multiplier"]
+    base_pts = int(order_doc.get("total", 0) // 10)
+    new_spend = (spend or 0) + order_doc.get("total", 0)
+    new_tier = tier_for(new_spend)
+
+    await _award_tier_points(member_doc, base_pts, tier, mult, awards)
+    await _award_stamps(member_doc, tier, awards)
+    _tier_promo_award(tier, new_tier, awards)
+    await _maybe_scratch_ticket(member_doc, order_doc, awards)
+    await _maybe_birthday_voucher(member_doc, new_tier, awards)
+    await _hh_points_boost(member_doc, base_pts, awards)
+    await _visit_streak_bonus(member_doc, awards)
+    await _referral_bonus(member_doc, awards)
     return awards
 
 
@@ -617,15 +643,11 @@ async def push_preview(body: PushSegmentIn, user: dict = Depends(get_current_use
     }
 
 
-@router.post("/push/send")
-async def push_send(body: PushSegmentIn, user: dict = Depends(get_current_user)):
-    if user["role"] not in ("admin", "manager"):
-        raise HTTPException(403, "Manager only")
-    members = await _match_segment(body)
-    # Optional Twilio wire-up — best-effort; MOCKED if creds missing
+def _twilio_client():
+    """Optional Twilio wire-up — returns (client, sms_from, whatsapp_from);
+    client is None when creds are missing (push then runs MOCKED)."""
     import os as _os
 
-    twilio_client = None
     tw_from_sms = _os.environ.get("TWILIO_SMS_FROM")
     tw_from_wa = _os.environ.get("TWILIO_WHATSAPP_FROM")  # e.g. whatsapp:+14155238886
     try:
@@ -634,9 +656,54 @@ async def push_send(body: PushSegmentIn, user: dict = Depends(get_current_user))
         if sid and tok:
             from twilio.rest import Client
 
-            twilio_client = Client(sid, tok)
+            return Client(sid, tok), tw_from_sms, tw_from_wa
     except Exception:
-        twilio_client = None
+        pass
+    return None, tw_from_sms, tw_from_wa
+
+
+def _compose_push_message(body: PushSegmentIn, voucher: dict, member: dict) -> tuple:
+    """Returns (message_body, normalised_phone)."""
+    amount_str = (
+        f"{body.discount_value}% off"
+        if body.discount_type == "percent"
+        else f"HK${body.discount_value:.0f} off"
+    )
+    msg_body = f"{body.title} · use code {voucher['code']} · expires in {body.ttl_days}d · {amount_str}"
+    phone = member.get("phone") or ""
+    # Normalise to +852 if bare 8-digit
+    if phone and not phone.startswith("+"):
+        phone = f"+852{phone.replace(' ', '')}"
+    return msg_body, phone
+
+
+def _deliver_push(
+    twilio_client, channel: str, msg_body: str, phone: str, tw_from_sms, tw_from_wa
+) -> tuple:
+    """Best-effort send; returns (status, error). MOCKED when no client/phone."""
+    if not twilio_client or not phone:
+        return "MOCKED", None
+    try:
+        if channel == "sms" and tw_from_sms:
+            twilio_client.messages.create(from_=tw_from_sms, to=phone, body=msg_body)
+            return "SENT", None
+        if channel == "whatsapp" and tw_from_wa:
+            twilio_client.messages.create(
+                from_=tw_from_wa, to=f"whatsapp:{phone}", body=msg_body
+            )
+            return "SENT", None
+        # email left to a future Resend/SendGrid integration
+    except Exception as e:
+        return "FAILED", str(e)[:200]
+    return "MOCKED", None
+
+
+@router.post("/push/send")
+async def push_send(body: PushSegmentIn, user: dict = Depends(get_current_user)):
+    if user["role"] not in ("admin", "manager"):
+        raise HTTPException(403, "Manager only")
+    members = await _match_segment(body)
+    twilio_client, tw_from_sms, tw_from_wa = _twilio_client()
 
     issued = 0
     delivered = 0
@@ -650,36 +717,10 @@ async def push_send(body: PushSegmentIn, user: dict = Depends(get_current_user))
             source="push_composer",
             ttl_days=body.ttl_days,
         )
-        # Compose message
-        amount_str = (
-            f"{body.discount_value}% off"
-            if body.discount_type == "percent"
-            else f"HK${body.discount_value:.0f} off"
+        msg_body, phone = _compose_push_message(body, v, m)
+        send_status, send_error = _deliver_push(
+            twilio_client, body.channel, msg_body, phone, tw_from_sms, tw_from_wa
         )
-        msg_body = f"{body.title} · use code {v['code']} · expires in {body.ttl_days}d · {amount_str}"
-        phone = m.get("phone") or ""
-        # Normalise to +852 if bare 8-digit
-        if phone and not phone.startswith("+"):
-            phone = f"+852{phone.replace(' ', '')}"
-
-        send_status = "MOCKED"
-        send_error = None
-        if twilio_client and phone:
-            try:
-                if body.channel == "sms" and tw_from_sms:
-                    twilio_client.messages.create(
-                        from_=tw_from_sms, to=phone, body=msg_body
-                    )
-                    send_status = "SENT"
-                elif body.channel == "whatsapp" and tw_from_wa:
-                    twilio_client.messages.create(
-                        from_=tw_from_wa, to=f"whatsapp:{phone}", body=msg_body
-                    )
-                    send_status = "SENT"
-                # email left to a future Resend/SendGrid integration
-            except Exception as e:
-                send_status = "FAILED"
-                send_error = str(e)[:200]
         if send_status == "SENT":
             delivered += 1
 

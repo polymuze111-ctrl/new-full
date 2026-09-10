@@ -4,6 +4,9 @@ import { toast } from "sonner";
 import { Beer, RefreshCw, Ban, AlertTriangle, Plus, Trash2, TrendingUp } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
+const TOOLTIP_STYLE = { background: "#121824", border: "1px solid #26334D" };
+const DOT_STYLE = { fill: "#00F2FE", r: 4 };
+
 export default function Kegs() {
   const [kegs, setKegs] = useState([]);
   const [products, setProducts] = useState([]);
@@ -181,9 +184,9 @@ function KegAnalyticsModal({ keg, onClose }) {
                   <XAxis dataKey="day" stroke="#94A3B8" fontSize={10}
                     tickFormatter={(d) => d.slice(5)} />
                   <YAxis stroke="#94A3B8" fontSize={10} />
-                  <Tooltip contentStyle={{ background: "#121824", border: "1px solid #26334D" }}
+                  <Tooltip contentStyle={TOOLTIP_STYLE}
                     formatter={(v) => [`${(v/568).toFixed(1)} pints`, "Pours"]} />
-                  <Line type="monotone" dataKey="ml" stroke="#00F2FE" strokeWidth={2} dot={{ fill: "#00F2FE", r: 4 }} />
+                  <Line type="monotone" dataKey="ml" stroke="#00F2FE" strokeWidth={2} dot={DOT_STYLE} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

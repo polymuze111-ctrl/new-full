@@ -5,6 +5,9 @@ import { TrendingUp, Users, Receipt, Wallet, Truck } from "lucide-react";
 
 const COLORS = ["#00F2FE", "#FFB800", "#A855F7", "#10B981", "#F43F5E", "#06B6D4"];
 const PLATFORM_TINT = { foodpanda: "#F43F5E", deliveroo: "#10B981", keeta: "#FFB800" };
+const TOOLTIP_STYLE = { background: "#121824", border: "1px solid #26334D" };
+const BAR_RADIUS_TOP = [4, 4, 0, 0];
+const BAR_RADIUS_RIGHT = [0, 4, 4, 0];
 
 export default function Reports() {
   const [data, setData] = useState(null);
@@ -77,8 +80,8 @@ export default function Reports() {
             <BarChart data={data.by_hour}>
               <XAxis dataKey="hour" stroke="#94A3B8" fontSize={11} />
               <YAxis stroke="#94A3B8" fontSize={11} />
-              <Tooltip contentStyle={{ background: "#121824", border: "1px solid #26334D" }} />
-              <Bar dataKey="revenue" fill="#00F2FE" radius={[4, 4, 0, 0]} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Bar dataKey="revenue" fill="#00F2FE" radius={BAR_RADIUS_TOP} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -88,7 +91,7 @@ export default function Reports() {
               <Pie data={data.by_category} dataKey="revenue" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={80} paddingAngle={2}>
                 {data.by_category.map((c, i) => <Cell key={c.name} fill={COLORS[i % COLORS.length]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: "#121824", border: "1px solid #26334D" }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
             </PieChart>
           </ResponsiveContainer>
           <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
@@ -107,8 +110,8 @@ export default function Reports() {
               <BarChart data={data.by_payment} layout="vertical">
                 <XAxis type="number" stroke="#94A3B8" fontSize={11} />
                 <YAxis type="category" dataKey="name" stroke="#94A3B8" fontSize={11} width={80} />
-                <Tooltip contentStyle={{ background: "#121824", border: "1px solid #26334D" }} />
-                <Bar dataKey="revenue" fill="#FFB800" radius={[0, 4, 4, 0]} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Bar dataKey="revenue" fill="#FFB800" radius={BAR_RADIUS_RIGHT} />
               </BarChart>
             </ResponsiveContainer>
           ) : <Empty />}

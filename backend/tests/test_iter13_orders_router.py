@@ -273,7 +273,7 @@ def test_bump_fire_pay_flow(sess, products):
     # bump line 0
     r = sess.post(f"{API}/orders/{oid}/bump/0", timeout=15)
     assert r.status_code == 200, r.text
-    assert r.json().get("ok") is True
+    assert r.json().get("ok") == True
 
     # pay cash
     r = sess.post(

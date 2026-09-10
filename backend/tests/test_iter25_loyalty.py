@@ -82,7 +82,7 @@ def test_summary_structure(sess):
     assert d["stamp_goal"] == 10
     assert d["tier"]["name"] == "Bronze"
     assert d["next_tier"]["name"] == "Silver"
-    assert d["can_spin"] is True
+    assert d["can_spin"] == True
     assert d["stamps"] == 0
     # Iter 27 added a signup welcome voucher, so the wallet is no longer empty
     assert all(v.get("source") == "signup" for v in d["vouchers"])

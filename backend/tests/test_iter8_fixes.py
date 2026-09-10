@@ -142,7 +142,7 @@ def test_kds_86_flow_hides_from_public_menu():
 
     # Verify product.eightysix true
     p2 = next(x for x in s.get(f"{API}/products").json() if x["id"] == pid)
-    assert p2.get("eightysix") is True
+    assert p2.get("eightysix") == True
 
     # Verify /api/public/menu/{table_id} excludes it
     tables = s.get(f"{API}/tables").json()

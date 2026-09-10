@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Zap, Send, X, Beer, Plus, Minus, TrendingUp } from "lucide-react";
 import Receipt from "@/components/pos/Receipt";
 import { errMsg } from "@/lib/errors";
+import { useHappyHour } from "@/hooks/useHappyHour";
 
 /**
  * Quick Bar Mode — one-tap bartender screen.
@@ -11,7 +12,6 @@ import { errMsg } from "@/lib/errors";
  */
 export default function QuickBar() {
   const [products, setProducts] = useState([]);
-  const [activeHH, setActiveHH] = useState([]);
   const [cart, setCart] = useState([]);
   const [combos, setCombos] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -20,28 +20,13 @@ export default function QuickBar() {
   useEffect(() => {
     api.get("/products").then((r) => setProducts(r.data.filter((p) => p.kind === "drink" && !p.eightysix)));
     api.get("/combos").then((r) => setCombos(r.data));
-    const loadHH = () => api.get("/happy-hours/active").then((r) => setActiveHH(r.data.active || []));
-    loadHH();
-    const t = setInterval(loadHH, 60000);
-    return () => clearInterval(t);
   }, []);
 
-  const hhFor = (p) => {
-    if (!p.happy_hour_eligible) return 0;
-    let best = 0;
-    for (const h of activeHH) {
-      if ((h.category_ids || []).includes(p.category_id)) best = Math.max(best, h.percent_off || 0);
-    }
-    return best;
-  };
-  const priceOf = (p) => {
-    const pct = hhFor(p);
-    return pct ? +(p.price * (1 - pct / 100)).toFixed(2) : p.price;
-  };
+  const { activeHH, hhFor, hhPrice } = useHappyHour();
 
   const addTile = (p) => {
     const pct = hhFor(p);
-    const price = priceOf(p);
+    const price = hhPrice(p);
     // If this tile had a heat-map hint, log it as an accepted upsell.
     const hint = tileHint(p);
     if (hint) {
@@ -181,7 +166,7 @@ export default function QuickBar() {
         <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3">
           {products.map((p) => {
             const pct = hhFor(p);
-            const price = priceOf(p);
+            const price = hhPrice(p);
             const hint = tileHint(p);
             // Log 'shown' for this hint once per session (dedupe via ref)
             if (hint) {

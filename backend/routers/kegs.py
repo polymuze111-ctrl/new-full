@@ -219,13 +219,8 @@ async def prep_bump_all(product_id: str, user: dict = Depends(get_current_user))
     return {"bumped": bumped}
 
 
-# ---------- Prep view (consolidated kitchen batch) ----------
-@router.get("/kds/prep")
-async def prep_view(user: dict = Depends(get_current_user)):
-    """Group fired items across open orders by product — kitchen bulk-cook view."""
-    orders = await db.orders.find({"status": "open"}).to_list(500)
-    tables = {str(t["_id"]): t for t in await db.tables.find().to_list(500)}
-    prods = {str(p["_id"]): p for p in await db.products.find().to_list(2000)}
+def _aggregate_prep(orders: list, tables: dict, prods: dict) -> dict:
+    """Group fired-not-bumped lines across open orders by product."""
     prep: dict = {}
     for o in orders:
         raw_name = tables.get(o.get("table_id") or "", {}).get("name")
@@ -249,6 +244,17 @@ async def prep_view(user: dict = Depends(get_current_user)):
             prep[key]["tables"][tname] = prep[key]["tables"].get(tname, 0) + (
                 line.get("qty") or 1
             )
+    return prep
+
+
+# ---------- Prep view (consolidated kitchen batch) ----------
+@router.get("/kds/prep")
+async def prep_view(user: dict = Depends(get_current_user)):
+    """Group fired items across open orders by product — kitchen bulk-cook view."""
+    orders = await db.orders.find({"status": "open"}).to_list(500)
+    tables = {str(t["_id"]): t for t in await db.tables.find().to_list(500)}
+    prods = {str(p["_id"]): p for p in await db.products.find().to_list(2000)}
+    prep = _aggregate_prep(orders, tables, prods)
     out = []
     for v in prep.values():
         out.append(

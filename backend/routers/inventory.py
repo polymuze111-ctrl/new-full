@@ -327,19 +327,9 @@ async def delete_recipe(rid: str, user: dict = Depends(get_current_user)):
 
 
 # ===================== AUTO-DEDUCTION =====================
-async def deduct_inventory_for_order(order: dict):
-    """Called on payment (alongside keg decrement). For each sold line with a
-    recipe: scale by variant multiplier, convert every ingredient to base
-    units, deduct, and log a 'sale' movement per item. Best-effort — callers
-    wrap in try/except so a stock issue can never block a payment."""
-    recipes = {
-        r["product_id"]: r
-        for r in await db.recipes.find({"active": {"$ne": False}}).to_list(500)
-    }
-    if not recipes:
-        return
-    units = await _units_map()
-    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+def _compute_order_deltas(order: dict, recipes: dict, units: dict, items: dict) -> dict:
+    """Map item_id -> signed base-unit delta for every recipe-linked line.
+    Variant multipliers scale the whole recipe (e.g. Double ×2)."""
     deltas: dict = {}
     for line in order.get("lines", []):
         r = recipes.get(line.get("product_id"))
@@ -362,8 +352,11 @@ async def deduct_inventory_for_order(order: dict):
                 rl.get("unit_id") or it.get("usage_unit_id"),
                 units,
             )
-    if not deltas:
-        return
+    return deltas
+
+
+async def _apply_inventory_deltas(deltas: dict, items: dict, order: dict):
+    """Apply signed deltas to stock, log one 'sale' movement per item, resync 86 flags."""
     now = datetime.now(timezone.utc).isoformat()
     server_name = None
     if order.get("server_id"):
@@ -397,6 +390,25 @@ async def deduct_inventory_for_order(order: dict):
         )
     await db.inventory_movements.insert_many(movements)
     await _sync_86_flag()
+
+
+async def deduct_inventory_for_order(order: dict):
+    """Called on payment (alongside keg decrement). For each sold line with a
+    recipe: scale by variant multiplier, convert every ingredient to base
+    units, deduct, and log a 'sale' movement per item. Best-effort — callers
+    wrap in try/except so a stock issue can never block a payment."""
+    recipes = {
+        r["product_id"]: r
+        for r in await db.recipes.find({"active": {"$ne": False}}).to_list(500)
+    }
+    if not recipes:
+        return
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    deltas = _compute_order_deltas(order, recipes, units, items)
+    if not deltas:
+        return
+    await _apply_inventory_deltas(deltas, items, order)
 
 
 # ===================== AUTO-86 SYNC =====================
@@ -714,14 +726,8 @@ async def stocktake_history(user: dict = Depends(get_current_user)):
 
 
 # ===================== ANALYTICS =====================
-@router.get("/analytics")
-async def inventory_analytics(days: int = 30, user: dict = Depends(get_current_user)):
-    """Usage velocity, waste cost and days-of-stock per item over N days."""
-    days = max(1, min(days, 90))
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    movs = await db.inventory_movements.find({"at": {"$gte": since}}).to_list(20000)
-    units = await _units_map()
-    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+def _aggregate_movement_totals(movs: list) -> dict:
+    """item_id -> {sold, waste, restock} in base units (sold/waste positive)."""
     agg: dict = {}
     for m in movs:
         a = agg.setdefault(
@@ -734,32 +740,46 @@ async def inventory_analytics(days: int = 30, user: dict = Depends(get_current_u
             a["waste"] += -d
         elif m.get("reason") == "restock":
             a["restock"] += d
-    rows = []
-    for iid, it in items.items():
-        a = agg.get(iid, {"sold": 0.0, "waste": 0.0, "restock": 0.0})
-        usage = units.get(str(it.get("usage_unit_id") or ""))
-        uf = (usage or {}).get("factor_to_base", 1.0)
-        pu = units.get(str(it.get("purchase_unit_id") or ""))
-        pf = (pu or {}).get("factor_to_base", 1.0)
-        cost = it.get("cost_per_purchase_unit", 0.0) or 0.0
-        velocity = a["sold"] / days  # base units per day
-        stock_base = it.get("stock_base", 0.0) or 0.0
-        rows.append(
-            {
-                "item_id": iid,
-                "name": it.get("name"),
-                "category": it.get("category"),
-                "unit_symbol": (usage or {}).get("symbol"),
-                "sold": round(a["sold"] / uf, 2),
-                "waste": round(a["waste"] / uf, 2),
-                "restocked": round(a["restock"] / uf, 2),
-                "usage_value": round((a["sold"] / pf) * cost, 2) if pf else 0.0,
-                "waste_value": round((a["waste"] / pf) * cost, 2) if pf else 0.0,
-                "days_of_stock": (
-                    round(stock_base / velocity, 1) if velocity > 0 else None
-                ),
-            }
+    return agg
+
+
+def _analytics_row(item: dict, a: dict, units: dict, days: int) -> dict:
+    usage = units.get(str(item.get("usage_unit_id") or ""))
+    uf = (usage or {}).get("factor_to_base", 1.0)
+    pu = units.get(str(item.get("purchase_unit_id") or ""))
+    pf = (pu or {}).get("factor_to_base", 1.0)
+    cost = item.get("cost_per_purchase_unit", 0.0) or 0.0
+    velocity = a["sold"] / days  # base units per day
+    stock_base = item.get("stock_base", 0.0) or 0.0
+    return {
+        "item_id": str(item["_id"]),
+        "name": item.get("name"),
+        "category": item.get("category"),
+        "unit_symbol": (usage or {}).get("symbol"),
+        "sold": round(a["sold"] / uf, 2),
+        "waste": round(a["waste"] / uf, 2),
+        "restocked": round(a["restock"] / uf, 2),
+        "usage_value": round((a["sold"] / pf) * cost, 2) if pf else 0.0,
+        "waste_value": round((a["waste"] / pf) * cost, 2) if pf else 0.0,
+        "days_of_stock": round(stock_base / velocity, 1) if velocity > 0 else None,
+    }
+
+
+@router.get("/analytics")
+async def inventory_analytics(days: int = 30, user: dict = Depends(get_current_user)):
+    """Usage velocity, waste cost and days-of-stock per item over N days."""
+    days = max(1, min(days, 90))
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    movs = await db.inventory_movements.find({"at": {"$gte": since}}).to_list(20000)
+    units = await _units_map()
+    items = {str(i["_id"]): i for i in await db.inventory_items.find().to_list(500)}
+    agg = _aggregate_movement_totals(movs)
+    rows = [
+        _analytics_row(
+            it, agg.get(iid, {"sold": 0.0, "waste": 0.0, "restock": 0.0}), units, days
         )
+        for iid, it in items.items()
+    ]
     rows.sort(key=lambda r: -r["usage_value"])
     return {
         "days": days,

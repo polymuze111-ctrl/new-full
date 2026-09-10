@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 25 — Behavior-preserving refactor (httpOnly cookie auth, useCallback hook fixes, orderTotals extraction, loyalty/inventory/kegs router refactors, Floorplan+Inventory component splits, stable keys, module-const chart configs, pytest '=='). BACKEND: full pytest 143/143 pass on fresh reseeded DB (drop_database + supervisor restart + -n 0). FRONTEND: verified via Playwright — (1) AUTH: httpOnly access_token cookie set, ZERO tokens in localStorage (verified via page.evaluate — only posthog key present, no hkbar_token/authToken), session persists after full reload, /api/auth/logout clears cookie, unauth /inventory→/login redirect works. (2) REGISTER: Cocktail Duo combo (HK Sour + Old Fashioned) applies -HK$38.4 (15% of HK$256) discount line in Order Ticket → subtotal HK$256, combo -HK$38.4, service 10% HK$21.76, TOTAL HK$239.36. COMBO badges 'COMBO · COCKTAIL DUO' render on both lines. (Note: the review request stated 'HK Sour + Neon Negroni combo-eligible' — this is factually incorrect per seed data: those two are both in slot-1 of Cocktail Duo so cannot combo together; correct pair Sour+OldFashioned tested successfully.) (3) FLOORPLAN: all 6 KPI testids present (kpi-covers/kpi-open/kpi-due/kpi-free/kpi-over30/kpi-day), sports ticker + sidebar (Active Promotions/Items to Push/Announcements) render. (4) QUICKBAR: /bar renders 13 drink tiles with prices. (5) REPORTS: 3 recharts render (revenue-by-hour bar, sales-by-category pie, payment-mix bar). (6) KEGS: 6 keg-chart-* buttons; clicking opens modal with data-testid='keg-chart' 7-day pour velocity chart (Tap 01 Tsingtao — 5 pints total). (7) PREAUTH MODAL: opens from Floorplan 'Preauth Tab' button, Stripe iframe (elementsOptions memoized) loads. (8) INVENTORY: all 8 tabs render (Stock/Items/Recipes/Units/Purchases/Stocktake/Analytics/Movements), 15 items. (9) LOYALTY: /loyalty page loads with 'Loyalty & Rewards' title + search input (useCallback fix — page mounts clean).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Floorplan sports ticker", "issues": ["Duplicate React key warnings in console (e.g., 'EPL-Man Utd vs Arsenal', 'NBA-Lakers vs Warriors', etc. repeated ~50 times per load). The ticker duplicates the fixtures array for infinite scroll animation but uses fixture id as key, causing duplicates. Not a functional bug (visuals fine) but noisy in console. Consider composing key from fixture id + duplication index (e.g., `${fx.id}-${dupIdx}`) in the ticker map to satisfy React's key uniqueness contract. This was pre-existing before this refactor iteration."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/",
+    "/app/test_reports/pytest/iter25_full.xml"
+  ],
+  "action_items": [
+    "(Optional / non-blocking) De-duplicate ticker keys in Floorplan sports ticker to eliminate React duplicate-key console warnings.",
+    "(Doc) Review request stated HK Sour + Neon Negroni are combo-eligible — they aren't (both live in slot-1 of the seeded 'Cocktail Duo' combo, valid pair is slot-1 × slot-2 e.g., Sour+Old Fashioned). Consider clarifying the combo seed docstring or the sample flow, but no code change needed."
+  ],
+  "critical_code_review_comments": [
+    "AuthContext migration is clean: /auth/me on mount, credentials:'include' via axios withCredentials, no localStorage token anywhere (confirmed page.evaluate returned only PostHog key). Cookie name 'access_token' is set httpOnly by backend and rides all subsequent /api calls.",
+    "computeOrderTotals (orderTotals.js) is a pure function — greedy best-first combo application + HH-lock exclusion mirrors backend _combo_matches. Verified end-to-end: UI subtotal/combo/service/total match backend contract (HK$239.36 for Sour+OldFashioned Cocktail Duo).",
+    "loyalty.py on_payment_earn orchestrator (8 helpers) and inventory helpers passed all iter25/27 loyalty tests + iter29/30 inventory tests unchanged — good decomposition without behavior drift.",
+    "useHappyHour hook is shared by Register + QuickBar — no divergent HH logic. QuickBar HH badges show when window active; no window active during test (Floorplan sidebar showed 'No live happy hours right now').",
+    "keg-chart data-testid lives on the modal wrapper (Kegs.jsx:181), not on the page — a test that queries for it on page load without opening the modal will see it missing. This is intentional; ensure test guides mention 'click keg-chart-<name> first'.",
+    "Recharts inline object → module const migration (TOOLTIP_STYLE, BAR_RADIUS_TOP/RIGHT, DOT_STYLE, CARD_ELEMENT_OPTIONS + useMemo elementsOptions) is good — prevents Recharts + Stripe.js recompute-per-render churn."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (143/143)", "frontend": "100% for all tested refactored flows"},
+  "test_credentials": "polymuze111@gmail.com / admin123 (PIN 9999)",
+  "seed_data_creation": "Full DB reset + reseed before pytest run (drop_database('test_database') + supervisorctl restart backend + sleep 12). No new UI-generated seed data left behind — combo test was pick-up (unsaved), preauth modal opened but not submitted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Auth is now httpOnly cookie ONLY — python 'requests' tests using Session() automatically retain the 'access_token' cookie via Set-Cookie. Backend still accepts Bearer for backward compat. When Playwright-testing auth, verify BOTH: (a) localStorage.getItem('hkbar_token') is null, (b) cookies contain 'access_token'. Combo seed reality: 'Cocktail Duo' slot-1 = HK Sour/Neon Negroni/Lychee Martini, slot-2 = Old Fashioned + one more (12a6). To trigger the combo pick one from each slot. keg-chart testid is inside the modal — you must click a keg-chart-<name> button first. /members and /rewards are NOT routes — sidebar labels both link to /loyalty. Sports ticker duplicate-key console warnings are pre-existing (not from this refactor).",
+  "rca of the issue": "N/A — refactor iteration is fully behavior-preserving. All 143 backend tests pass, all 10 UI flows in the review request verified working, no regressions detected. The one caveat (HK Sour + Neon Negroni not combo-eligible) is a request-description error, not a bug — verified with correct pair Sour + Old Fashioned."
+}

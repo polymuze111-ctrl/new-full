@@ -182,7 +182,7 @@ class TestShifts:
         assert ci.status_code == 200
 
         cur0 = requests.get(f"{BASE_URL}/api/shifts/current", headers=server_h).json()
-        assert cur0["open"] is True
+        assert cur0["open"] == True
         rev0 = cur0["revenue"]
         ord0 = cur0["orders"]
         tips0 = cur0["tips"]
@@ -225,7 +225,7 @@ class TestShifts:
         assert pr.status_code == 200
 
         cur1 = requests.get(f"{BASE_URL}/api/shifts/current", headers=server_h).json()
-        assert cur1["open"] is True
+        assert cur1["open"] == True
         assert cur1["orders"] == ord0 + 1
         assert abs(cur1["revenue"] - (rev0 + o["total"])) < 0.02
         assert abs(cur1["tips"] - (tips0 + 10)) < 0.02
@@ -239,7 +239,7 @@ class TestShifts:
 
         # Subsequent /current -> open:false
         cur2 = requests.get(f"{BASE_URL}/api/shifts/current", headers=server_h).json()
-        assert cur2["open"] is False
+        assert cur2["open"] == False
 
     def test_shifts_list_role_scoping(self, admin_h, server_h, manager_h):
         # admin sees all, server only own

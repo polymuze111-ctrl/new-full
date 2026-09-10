@@ -48,7 +48,7 @@ def test_kegs_list_seeded(s):
     tap01 = next((k for k in kegs if k["name"].startswith("Tap 01")), None)
     assert tap01 is not None
     assert 6 <= tap01["pct_remaining"] <= 10, f"pct_remaining={tap01['pct_remaining']}"
-    assert tap01["alert"] is True
+    assert tap01["alert"] == True
 
 
 # -------- Keg CRUD --------
