@@ -10,15 +10,28 @@ Exclusivity rule (per user, Iter 13):
       • Order-level manual discount (percent or cash)
     Precedence when there's a conflict is: HH  ->  Combo  ->  Order-level discount.
 """
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from deps import db, _oid, serialize, sl
 from auth import make_current_user_dep
-from models import OrderIn, OrderUpdate, PaymentIn, AutoCloseIn, MoveLineIn, MergeOrdersIn, PreauthTabIn, DeliveryIngestIn, SetupIntentIn, PreauthCompleteIn, UpsellNudgeIn
+from deps import _oid, db, serialize, sl
+from models import (
+    AutoCloseIn,
+    DeliveryIngestIn,
+    MergeOrdersIn,
+    MoveLineIn,
+    OrderIn,
+    OrderUpdate,
+    PaymentIn,
+    PreauthCompleteIn,
+    PreauthTabIn,
+    SetupIntentIn,
+    UpsellNudgeIn,
+)
 from routers.kegs import decrement_kegs_for_order
 
 HK_TZ = ZoneInfo("Asia/Hong_Kong")
@@ -64,29 +77,32 @@ def _combo_involved_pids(c):
     return set(c.get("product_ids") or [])
 
 
-def _compute_totals(lines, discount_type, discount_value, service_charge_pct, combos=None):
+def _compute_totals(
+    lines, discount_type, discount_value, service_charge_pct, combos=None
+):
     """See module docstring for the exclusivity rule."""
-    subtotal = sum(l["price"] * l["qty"] for l in lines)
+    subtotal = sum(line["price"] * line["qty"] for line in lines)
     discount = 0.0
     combo_discount = 0.0
     combos_applied = []
 
     # 1) HH lock — any line whose register already applied happy-hour pricing
     hh_locked = {
-        l.get("product_id")
-        for l in lines
-        if (l.get("hh_pct") or 0) > 0 and l.get("product_id")
+        line.get("product_id")
+        for line in lines
+        if (line.get("hh_pct") or 0) > 0 and line.get("product_id")
     }
 
     # 2) Build combo-eligible qty map (skip HH-locked pids entirely)
     line_qtys: dict = {}
-    for l in lines:
-        pid = l.get("product_id")
-        if pid and pid not in hh_locked and (l.get("qty") or 0) > 0:
-            line_qtys[pid] = line_qtys.get(pid, 0) + l["qty"]
+    for line in lines:
+        pid = line.get("product_id")
+        if pid and pid not in hh_locked and (line.get("qty") or 0) > 0:
+            line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
 
     combo_locked: set = set()
     if combos:
+
         def _potential(c):
             return (
                 subtotal * (c.get("discount_value", 0) / 100)
@@ -108,13 +124,15 @@ def _compute_totals(lines, discount_type, discount_value, service_charge_pct, co
                 continue
             d = _potential(c)
             combo_discount += d
-            combos_applied.append({
-                "name": c.get("name"),
-                "discount_type": c.get("discount_type"),
-                "discount_value": c.get("discount_value"),
-                "applied_discount": round(d, 2),
-                "locked_product_ids": list(involved),
-            })
+            combos_applied.append(
+                {
+                    "name": c.get("name"),
+                    "discount_type": c.get("discount_type"),
+                    "discount_value": c.get("discount_value"),
+                    "applied_discount": round(d, 2),
+                    "locked_product_ids": list(involved),
+                }
+            )
             combo_locked |= involved
             for pid in involved:
                 line_qtys.pop(pid, None)
@@ -122,7 +140,9 @@ def _compute_totals(lines, discount_type, discount_value, service_charge_pct, co
     # 3) Order-level discount only against lines NOT locked by HH or a combo
     promo_locked = hh_locked | combo_locked
     disc_base = sum(
-        l["price"] * l["qty"] for l in lines if l.get("product_id") not in promo_locked
+        line["price"] * line["qty"]
+        for line in lines
+        if line.get("product_id") not in promo_locked
     )
     if discount_type == "percent":
         discount = disc_base * (discount_value / 100.0)
@@ -170,7 +190,11 @@ def _combo_in_window(c: dict, now_hk: datetime) -> bool:
 
 # ---------- Endpoints ----------
 @router.get("/orders")
-async def list_orders(status: Optional[str] = None, limit: int = 100, user: dict = Depends(get_current_user)):
+async def list_orders(
+    status: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(get_current_user),
+):
     q = {"status": status} if status else {}
     return sl(await db.orders.find(q).sort("opened_at", -1).to_list(limit))
 
@@ -185,9 +209,11 @@ async def get_order(oid: str, user: dict = Depends(get_current_user)):
 
 @router.post("/orders")
 async def create_order(body: OrderIn, user: dict = Depends(get_current_user)):
-    lines = [l.model_dump() for l in body.lines]
+    lines = [line.model_dump() for line in body.lines]
     combos = await _active_combos()
-    totals = _compute_totals(lines, body.discount_type, body.discount_value, body.service_charge_pct, combos)
+    totals = _compute_totals(
+        lines, body.discount_type, body.discount_value, body.service_charge_pct, combos
+    )
     doc = body.model_dump()
     doc["lines"] = lines
     doc.update(totals)
@@ -207,7 +233,9 @@ async def create_order(body: OrderIn, user: dict = Depends(get_current_user)):
 
 
 @router.patch("/orders/{oid}")
-async def update_order(oid: str, body: OrderUpdate, user: dict = Depends(get_current_user)):
+async def update_order(
+    oid: str, body: OrderUpdate, user: dict = Depends(get_current_user)
+):
     existing = await db.orders.find_one({"_id": _oid(oid)})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -236,16 +264,18 @@ async def update_order(oid: str, body: OrderUpdate, user: dict = Depends(get_cur
 
 
 @router.post("/orders/{oid}/fire")
-async def fire_order(oid: str, course: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def fire_order(
+    oid: str, course: Optional[str] = None, user: dict = Depends(get_current_user)
+):
     o = await db.orders.find_one({"_id": _oid(oid)})
     if not o:
         raise HTTPException(404, "Not found")
     lines = o.get("lines", [])
     fired = 0
-    for l in lines:
-        if l.get("held") and (course is None or l.get("course") == course):
-            l["held"] = False
-            l["fired_at"] = datetime.now(timezone.utc).isoformat()
+    for line in lines:
+        if line.get("held") and (course is None or line.get("course") == course):
+            line["held"] = False
+            line["fired_at"] = datetime.now(timezone.utc).isoformat()
             fired += 1
     await db.orders.update_one({"_id": _oid(oid)}, {"$set": {"lines": lines}})
     return {"fired": fired}
@@ -260,20 +290,31 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
     if body.method == "split":
         paid = sum((s.get("amount") or 0) for s in body.splits)
         if paid + 0.01 < o["total"]:
-            raise HTTPException(400, f"Split total HK${paid:.2f} is less than order total HK${o['total']:.2f}")
+            raise HTTPException(
+                400,
+                f"Split total HK${paid:.2f} is less than order total HK${o['total']:.2f}",
+            )
         change = round(paid - o["total"], 2)
     elif body.method == "cash":
         change = round(body.amount - o["total"], 2)
     payment = {
-        "method": body.method, "amount": body.amount, "tip": body.tip,
-        "splits": body.splits, "change": max(change, 0),
+        "method": body.method,
+        "amount": body.amount,
+        "tip": body.tip,
+        "splits": body.splits,
+        "change": max(change, 0),
         "paid_at": datetime.now(timezone.utc).isoformat(),
         "cashier_id": user["id"],
     }
     await db.orders.update_one(
         {"_id": _oid(oid)},
-        {"$set": {"status": "paid", "payment": payment,
-                  "closed_at": datetime.now(timezone.utc).isoformat()}},
+        {
+            "$set": {
+                "status": "paid",
+                "payment": payment,
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
     if o.get("table_id"):
         await db.tables.update_one(
@@ -293,7 +334,7 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
                 dur_min = int(d.total_seconds() / 60)
             except Exception:
                 dur_min = 0
-        item_names = [l["name"] for l in o.get("lines", [])]
+        item_names = [line["name"] for line in o.get("lines", [])]
         member = await db.members.find_one({"_id": _oid(o["member_id"])})
         if member:
             # Snapshot pre-payment lifetime_spend BEFORE the $set so tier promotion
@@ -309,15 +350,20 @@ async def pay_order(oid: str, body: PaymentIn, user: dict = Depends(get_current_
             avg_new = int(((avg_prev * (visits - 1)) + dur_min) / max(visits, 1))
             await db.members.update_one(
                 {"_id": _oid(o["member_id"])},
-                {"$set": {
-                    "visits": visits, "lifetime_spend": lifetime,
-                    "points": points, "favorite_items": fav,
-                    "avg_duration_min": avg_new,
-                }},
+                {
+                    "$set": {
+                        "visits": visits,
+                        "lifetime_spend": lifetime,
+                        "points": points,
+                        "favorite_items": fav,
+                        "avg_duration_min": avg_new,
+                    }
+                },
             )
             # Loyalty auto-earn — pass pre-payment snapshot so tier promotion fires.
             try:
                 from routers.loyalty import on_payment_earn
+
                 await on_payment_earn(pre_snapshot, o)
             except Exception:
                 pass  # loyalty is best-effort; must not block pay
@@ -416,10 +462,26 @@ async def move_line(oid: str, body: MoveLineIn, user: dict = Depends(get_current
         if body.target_seat is not None:
             moved["seat"] = int(body.target_seat)
         tgt_lines = list(tgt.get("lines", [])) + [moved]
-        src_totals = _compute_totals(lines, src.get("discount_type", "none"), src.get("discount_value", 0), src.get("service_charge_pct", 10), combos)
-        tgt_totals = _compute_totals(tgt_lines, tgt.get("discount_type", "none"), tgt.get("discount_value", 0), tgt.get("service_charge_pct", 10), combos)
-        await db.orders.update_one({"_id": src["_id"]}, {"$set": {"lines": lines, **src_totals}})
-        await db.orders.update_one({"_id": tgt["_id"]}, {"$set": {"lines": tgt_lines, **tgt_totals}})
+        src_totals = _compute_totals(
+            lines,
+            src.get("discount_type", "none"),
+            src.get("discount_value", 0),
+            src.get("service_charge_pct", 10),
+            combos,
+        )
+        tgt_totals = _compute_totals(
+            tgt_lines,
+            tgt.get("discount_type", "none"),
+            tgt.get("discount_value", 0),
+            tgt.get("service_charge_pct", 10),
+            combos,
+        )
+        await db.orders.update_one(
+            {"_id": src["_id"]}, {"$set": {"lines": lines, **src_totals}}
+        )
+        await db.orders.update_one(
+            {"_id": tgt["_id"]}, {"$set": {"lines": tgt_lines, **tgt_totals}}
+        )
         return {"ok": True, "moved_to": str(tgt["_id"])}
 
     # Same-order reseat
@@ -443,19 +505,38 @@ async def merge_orders(body: MergeOrdersIn, user: dict = Depends(get_current_use
         raise HTTPException(400, "Both orders must be open")
     combos = await _active_combos()
     merged_lines = list(tgt.get("lines", [])) + list(src.get("lines", []))
-    totals = _compute_totals(merged_lines, tgt.get("discount_type", "none"), tgt.get("discount_value", 0), tgt.get("service_charge_pct", 10), combos)
-    await db.orders.update_one({"_id": tgt["_id"]}, {"$set": {"lines": merged_lines, **totals}})
+    totals = _compute_totals(
+        merged_lines,
+        tgt.get("discount_type", "none"),
+        tgt.get("discount_value", 0),
+        tgt.get("service_charge_pct", 10),
+        combos,
+    )
+    await db.orders.update_one(
+        {"_id": tgt["_id"]}, {"$set": {"lines": merged_lines, **totals}}
+    )
     await db.orders.update_one(
         {"_id": src["_id"]},
-        {"$set": {"status": "voided", "voided_reason": "merged", "merged_into": body.target_id,
-                  "closed_at": datetime.now(timezone.utc).isoformat()}},
+        {
+            "$set": {
+                "status": "voided",
+                "voided_reason": "merged",
+                "merged_into": body.target_id,
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
     if src.get("table_id"):
         await db.tables.update_one(
             {"_id": _oid(src["table_id"])},
             {"$set": {"status": "available", "current_order_id": None}},
         )
-    return {"ok": True, "merged_into": body.target_id, "line_count": len(merged_lines), "total": totals["total"]}
+    return {
+        "ok": True,
+        "merged_into": body.target_id,
+        "line_count": len(merged_lines),
+        "total": totals["total"],
+    }
 
 
 # ---------- Combo heat-map (upsell nudge) ----------
@@ -474,19 +555,26 @@ async def combo_hints(user: dict = Depends(get_current_user)):
     if not combos:
         return []
     open_orders = await db.orders.find({"status": "open"}).to_list(500)
-    prods = {str(p["_id"]): p for p in await db.products.find({"eightysix": {"$ne": True}}).to_list(2000)}
+    prods = {
+        str(p["_id"]): p
+        for p in await db.products.find({"eightysix": {"$ne": True}}).to_list(2000)
+    }
     out = []
     for o in open_orders:
         if not o.get("table_id") or not o.get("lines"):
             continue
-        hh_locked = {l.get("product_id") for l in o["lines"] if (l.get("hh_pct") or 0) > 0}
+        hh_locked = {
+            line.get("product_id")
+            for line in o["lines"]
+            if (line.get("hh_pct") or 0) > 0
+        }
         line_qtys: dict = {}
-        for l in o["lines"]:
-            pid = l.get("product_id")
-            if pid and pid not in hh_locked and (l.get("qty") or 0) > 0:
-                line_qtys[pid] = line_qtys.get(pid, 0) + l["qty"]
+        for line in o["lines"]:
+            pid = line.get("product_id")
+            if pid and pid not in hh_locked and (line.get("qty") or 0) > 0:
+                line_qtys[pid] = line_qtys.get(pid, 0) + line["qty"]
 
-        sub_now = sum(l["price"] * l["qty"] for l in o["lines"])
+        sub_now = sum(line["price"] * line["qty"] for line in o["lines"])
         table_hints = []
         for c in combos:
             if _combo_matches(c, line_qtys):
@@ -500,25 +588,31 @@ async def combo_hints(user: dict = Depends(get_current_user)):
                     p = prods[pid]
                     price = p.get("price", 0) or 0
                     d = _potential_discount(c, sub_now + price)
-                    table_hints.append({
-                        "combo_id": str(c["_id"]),
-                        "combo_name": c.get("name"),
-                        "product_id": pid,
-                        "product_name": p.get("name"),
-                        "product_price": price,
-                        "discount": round(d, 2),
-                        "discount_type": c.get("discount_type"),
-                        "discount_value": c.get("discount_value"),
-                        "net_gain": round(d - price, 2),  # positive if the discount beats the extra product's cost
-                    })
+                    table_hints.append(
+                        {
+                            "combo_id": str(c["_id"]),
+                            "combo_name": c.get("name"),
+                            "product_id": pid,
+                            "product_name": p.get("name"),
+                            "product_price": price,
+                            "discount": round(d, 2),
+                            "discount_type": c.get("discount_type"),
+                            "discount_value": c.get("discount_value"),
+                            "net_gain": round(
+                                d - price, 2
+                            ),  # positive if the discount beats the extra product's cost
+                        }
+                    )
                     break  # 1 hint per combo is enough
         if table_hints:
             table_hints.sort(key=lambda h: -h["net_gain"])
-            out.append({
-                "table_id": o["table_id"],
-                "order_id": str(o["_id"]),
-                "hints": table_hints[:3],
-            })
+            out.append(
+                {
+                    "table_id": o["table_id"],
+                    "order_id": str(o["_id"]),
+                    "hints": table_hints[:3],
+                }
+            )
     return out
 
 
@@ -547,10 +641,16 @@ async def open_preauth_tab(body: PreauthTabIn, user: dict = Depends(get_current_
             "opened_at": now,
         },
         "status": "open",
-        "subtotal": 0.0, "discount": 0.0, "combo_discount": 0.0,
-        "combos_applied": [], "hh_locked_product_ids": [], "combo_locked_product_ids": [],
-        "service_charge": 0.0, "total": 0.0,
-        "opened_at": now, "closed_at": None,
+        "subtotal": 0.0,
+        "discount": 0.0,
+        "combo_discount": 0.0,
+        "combos_applied": [],
+        "hh_locked_product_ids": [],
+        "combo_locked_product_ids": [],
+        "service_charge": 0.0,
+        "total": 0.0,
+        "opened_at": now,
+        "closed_at": None,
     }
     r = await db.orders.insert_one(doc)
     order_id = str(r.inserted_id)
@@ -565,15 +665,23 @@ async def open_preauth_tab(body: PreauthTabIn, user: dict = Depends(get_current_
 
 # ---------- Delivery Ingest (Foodpanda / Deliveroo / KeeTa) ----------
 import os as _os
+
 try:
     import stripe as _stripe
-    _stripe.api_key = _os.environ.get("STRIPE_SECRET_KEY") or _os.environ.get("STRIPE_API_KEY") or "sk_test_emergent"
+
+    _stripe.api_key = (
+        _os.environ.get("STRIPE_SECRET_KEY")
+        or _os.environ.get("STRIPE_API_KEY")
+        or "sk_test_emergent"
+    )
 except ImportError:
-    _stripe = None
+    _stripe = None  # type: ignore[assignment]
 
 
 @router.post("/tabs/preauth/setup-intent")
-async def create_preauth_setup_intent(body: SetupIntentIn, user: dict = Depends(get_current_user)):
+async def create_preauth_setup_intent(
+    body: SetupIntentIn, user: dict = Depends(get_current_user)
+):
     """Create a Stripe SetupIntent for card-on-file preauth. Returns the
     client_secret the frontend hands to Stripe Elements to confirm off-session
     payment method storage. Later, /pay uses the stored payment_method id."""
@@ -592,64 +700,86 @@ async def create_preauth_setup_intent(body: SetupIntentIn, user: dict = Depends(
 
 
 @router.post("/tabs/preauth/complete")
-async def complete_preauth(body: PreauthCompleteIn, user: dict = Depends(get_current_user)):
+async def complete_preauth(
+    body: PreauthCompleteIn, user: dict = Depends(get_current_user)
+):
     """After Stripe Elements confirms the SetupIntent, the frontend calls this
     to attach the real payment_method + card details onto the preauth order."""
     if not _stripe:
         raise HTTPException(500, "Stripe SDK not installed")
     si = _stripe.SetupIntent.retrieve(body.setup_intent_id, expand=["payment_method"])
     pm = si.payment_method
+    if pm and isinstance(pm, str):
+        pm = _stripe.PaymentMethod.retrieve(pm)
     card = getattr(pm, "card", None) if pm else None
     if not card:
         raise HTTPException(400, "SetupIntent has no confirmed card")
     await db.orders.update_one(
         {"_id": _oid(body.order_id)},
-        {"$set": {
-            "preauth.stripe_setup_intent_id": si.id,
-            "preauth.stripe_payment_method_id": pm.id,
-            "preauth.card_last4": card.last4,
-            "preauth.card_brand": card.brand,
-            "preauth.card_exp": f"{card.exp_month:02d}/{card.exp_year % 100:02d}",
-            "preauth.status": si.status,
-        }},
+        {
+            "$set": {
+                "preauth.stripe_setup_intent_id": si.id,
+                "preauth.stripe_payment_method_id": getattr(pm, "id", None),
+                "preauth.card_last4": card.last4,
+                "preauth.card_brand": card.brand,
+                "preauth.card_exp": f"{card.exp_month:02d}/{card.exp_year % 100:02d}",
+                "preauth.status": si.status,
+            }
+        },
     )
     return {"ok": True, "card_last4": card.last4, "brand": card.brand}
 
 
 @router.post("/delivery/ingest")
-async def ingest_delivery(body: DeliveryIngestIn, user: dict = Depends(get_current_user)):
+async def ingest_delivery(
+    body: DeliveryIngestIn, user: dict = Depends(get_current_user)
+):
     """MOCKED — accepts a delivery-platform webhook payload and turns it into
     an auto-fired KDS order. Real webhooks would sign requests; here we trust
     authenticated staff / a demo simulator."""
     ids = [_oid(i.product_id) for i in body.items]
-    prods = {str(p["_id"]): p for p in await db.products.find({"_id": {"$in": ids}}).to_list(500)}
+    prods = {
+        str(p["_id"]): p
+        for p in await db.products.find({"_id": {"$in": ids}}).to_list(500)
+    }
     now = datetime.now(timezone.utc).isoformat()
     lines = []
     for item in body.items:
         p = prods.get(item.product_id)
         if not p:
             continue
-        lines.append({
-            "product_id": str(p["_id"]),
-            "name": p["name"],
-            "price": p["price"],
-            "qty": item.qty,
-            "variant": None, "modifiers": [],
-            "course": p.get("course", "main"),
-            "held": False, "notes": item.notes or "",
-            "hh_pct": 0.0, "seat": 1,
-            "fired_at": now,  # auto-fire so it lands on KDS instantly
-        })
+        lines.append(
+            {
+                "product_id": str(p["_id"]),
+                "name": p["name"],
+                "price": p["price"],
+                "qty": item.qty,
+                "variant": None,
+                "modifiers": [],
+                "course": p.get("course", "main"),
+                "held": False,
+                "notes": item.notes or "",
+                "hh_pct": 0.0,
+                "seat": 1,
+                "fired_at": now,  # auto-fire so it lands on KDS instantly
+            }
+        )
     if not lines:
         raise HTTPException(400, "No valid products in payload")
     combos = await _active_combos()
-    totals = _compute_totals(lines, "none", 0.0, 0.0, combos)  # no service charge for delivery
+    totals = _compute_totals(
+        lines, "none", 0.0, 0.0, combos
+    )  # no service charge for delivery
     doc = {
         "order_type": "delivery",
-        "table_id": None, "area_id": None,
-        "member_id": None, "guests": 1, "server_id": user["id"],
+        "table_id": None,
+        "area_id": None,
+        "member_id": None,
+        "guests": 1,
+        "server_id": user["id"],
         "lines": lines,
-        "discount_type": "none", "discount_value": 0.0,
+        "discount_type": "none",
+        "discount_value": 0.0,
         "service_charge_pct": 0.0,
         "notes": f"{body.platform.upper()} #{body.external_id} · {body.customer_name}",
         "delivery": {
@@ -662,7 +792,8 @@ async def ingest_delivery(body: DeliveryIngestIn, user: dict = Depends(get_curre
         },
         **totals,
         "status": "open",
-        "opened_at": now, "closed_at": None,
+        "opened_at": now,
+        "closed_at": None,
     }
     r = await db.orders.insert_one(doc)
     doc["_id"] = r.inserted_id
@@ -675,21 +806,27 @@ async def simulate_delivery(user: dict = Depends(get_current_user)):
     Uses `secrets` (CSPRNG) even though this is demo-only, so the review scanner
     doesn't flag a false-positive on `random` for security-sensitive contexts."""
     import secrets
-    platforms = ["foodpanda", "deliveroo", "keeta"]
+
+    platforms: list = ["foodpanda", "deliveroo", "keeta"]
     names = ["Chan Ka Ming", "Wong Wai", "Li Ho Yan", "Tang Sze Man", "Cheung Wing"]
-    prods = await db.products.find({"eightysix": {"$ne": True}, "kind": "food"}).to_list(500)
+    prods = await db.products.find(
+        {"eightysix": {"$ne": True}, "kind": "food"}
+    ).to_list(500)
     if not prods:
         raise HTTPException(400, "No food products available")
     # secrets.choice for pick, secrets.randbelow for qty; k random picks via shuffle-then-slice
     shuffled = sorted(prods, key=lambda _: secrets.token_hex(4))
     picks = shuffled[: min(3, len(prods))]
     from models import DeliveryLineIn as _DL
+
     body = DeliveryIngestIn(
         platform=secrets.choice(platforms),
         external_id=f"SIM-{int(datetime.now(timezone.utc).timestamp())}",
         customer_name=secrets.choice(names),
         customer_phone="+852 9***",
-        items=[_DL(product_id=str(p["_id"]), qty=1 + secrets.randbelow(2)) for p in picks],
+        items=[
+            _DL(product_id=str(p["_id"]), qty=1 + secrets.randbelow(2)) for p in picks
+        ],
         fee=15.0,
     )
     return await ingest_delivery(body, user)
@@ -698,7 +835,11 @@ async def simulate_delivery(user: dict = Depends(get_current_user)):
 @router.get("/delivery/inbox")
 async def delivery_inbox(user: dict = Depends(get_current_user)):
     """Every open delivery order (any platform), newest first."""
-    orders = await db.orders.find({"order_type": "delivery", "delivery": {"$exists": True}}).sort("opened_at", -1).to_list(200)
+    orders = (
+        await db.orders.find({"order_type": "delivery", "delivery": {"$exists": True}})
+        .sort("opened_at", -1)
+        .to_list(200)
+    )
     return sl(orders)
 
 
@@ -709,21 +850,25 @@ async def log_upsell(body: UpsellNudgeIn, user: dict = Depends(get_current_user)
     (server, combo, product, order) so the poller doesn't spam the feed."""
     now = datetime.now(timezone.utc).isoformat()
     doc = body.model_dump()
-    doc.update({
-        "server_id": user["id"],
-        "server_name": user.get("name") or user.get("email"),
-        "ts": now,
-    })
+    doc.update(
+        {
+            "server_id": user["id"],
+            "server_name": user.get("name") or user.get("email"),
+            "ts": now,
+        }
+    )
     if body.status == "shown":
         recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
-        dup = await db.upsell_nudges.find_one({
-            "server_id": user["id"],
-            "combo_name": body.combo_name,
-            "product_id": body.product_id,
-            "order_id": body.order_id,
-            "status": "shown",
-            "ts": {"$gte": recent_cutoff},
-        })
+        dup = await db.upsell_nudges.find_one(
+            {
+                "server_id": user["id"],
+                "combo_name": body.combo_name,
+                "product_id": body.product_id,
+                "order_id": body.order_id,
+                "status": "shown",
+                "ts": {"$gte": recent_cutoff},
+            }
+        )
         if dup:
             return {"ok": True, "deduped": True}
     r = await db.upsell_nudges.insert_one(doc)
@@ -738,18 +883,26 @@ async def upsell_feed(limit: int = 50, user: dict = Depends(get_current_user)):
 
 
 @router.get("/upsell/leaderboard")
-async def upsell_leaderboard(window_hours: int = 168, user: dict = Depends(get_current_user)):
+async def upsell_leaderboard(
+    window_hours: int = 168, user: dict = Depends(get_current_user)
+):
     """Aggregate the last N hours (default 7d) by server: shown, accepted,
     conversion %, revenue lifted."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
     docs = await db.upsell_nudges.find({"ts": {"$gte": cutoff}}).to_list(5000)
     by_server: dict = {}
     for d in docs:
-        row = by_server.setdefault(d["server_id"], {
-            "server_id": d["server_id"],
-            "server_name": d.get("server_name", "—"),
-            "shown": 0, "accepted": 0, "dismissed": 0, "revenue_lifted": 0.0,
-        })
+        row = by_server.setdefault(
+            d["server_id"],
+            {
+                "server_id": d["server_id"],
+                "server_name": d.get("server_name", "—"),
+                "shown": 0,
+                "accepted": 0,
+                "dismissed": 0,
+                "revenue_lifted": 0.0,
+            },
+        )
         s = d.get("status", "shown")
         if s in row:
             row[s] += 1

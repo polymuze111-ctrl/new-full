@@ -1,6 +1,9 @@
 """Iteration 27 loyalty tests: signup bonus, referral, happy-hour boost,
 visit streak, feedback, social share."""
-import os, time, uuid
+
+import os
+import uuid
+
 import pytest
 import requests
 from bson import ObjectId
@@ -31,8 +34,11 @@ def tag():
 
 
 def _create_member(c, name, extra=None):
-    payload = {"name": name, "phone": f"9{uuid.uuid4().int % 10**7:07d}",
-               "email": f"{name.lower().replace(' ','')}@test.com"}
+    payload = {
+        "name": name,
+        "phone": f"9{uuid.uuid4().int % 10**7:07d}",
+        "email": f"{name.lower().replace(' ','')}@test.com",
+    }
     if extra:
         payload.update(extra)
     r = c.post(f"{API}/members", json=payload)
@@ -79,16 +85,28 @@ def _pay_dummy_order(client, mid, total=200.0):
     # (using minimal fake line with proper structure).
     prod = _db.products.find_one({}) or {}
     pid = str(prod.get("_id", "")) or "000000000000000000000000"
-    r = client.post(f"{API}/orders", json={
-        "order_type": "pick_up",
-        "member_id": mid,
-        "lines": [{"product_id": pid, "name": "Test Item",
-                   "price": total, "qty": 1, "course": "main"}],
-        "service_charge_pct": 0,
-    })
+    r = client.post(
+        f"{API}/orders",
+        json={
+            "order_type": "pick_up",
+            "member_id": mid,
+            "lines": [
+                {
+                    "product_id": pid,
+                    "name": "Test Item",
+                    "price": total,
+                    "qty": 1,
+                    "course": "main",
+                }
+            ],
+            "service_charge_pct": 0,
+        },
+    )
     assert r.status_code == 200, r.text
     oid = r.json()["id"]
-    r2 = client.post(f"{API}/orders/{oid}/pay", json={"method": "cash", "amount": total * 1.1})
+    r2 = client.post(
+        f"{API}/orders/{oid}/pay", json={"method": "cash", "amount": total * 1.1}
+    )
     assert r2.status_code == 200, r2.text
     return oid
 
@@ -110,8 +128,12 @@ def test_referral_first_order_bonus(client, tag):
         s1 = _get_summary(client, m1["id"])
         s2 = _get_summary(client, m2["id"])
         assert s2["member"].get("referral_awarded") is True
-        assert s2["points"] >= pts_m2_before + 200, f"M2 points {s2['points']} vs before {pts_m2_before}"
-        assert s1["points"] >= pts_m1_before + 200, f"M1 points {s1['points']} vs before {pts_m1_before}"
+        assert (
+            s2["points"] >= pts_m2_before + 200
+        ), f"M2 points {s2['points']} vs before {pts_m2_before}"
+        assert (
+            s1["points"] >= pts_m1_before + 200
+        ), f"M1 points {s1['points']} vs before {pts_m1_before}"
         ref_vs_m2 = [v for v in s2["vouchers"] if v.get("source") == "referral_new"]
         ref_vs_m1 = [v for v in s1["vouchers"] if v.get("source") == "referral_ref"]
         assert ref_vs_m2, "M2 missing referral_new voucher"
@@ -136,11 +158,17 @@ def test_happy_hour_points_boost(client, tag):
     hh_id = None
     try:
         # Insert wide HH window covering all weekdays
-        r = client.post(f"{API}/happy-hours", json={
-            "name": f"{tag}_hh_all", "days": [0,1,2,3,4,5,6],
-            "start_time": "00:00", "end_time": "23:59",
-            "percent_off": 20.0, "category_ids": [],
-        })
+        r = client.post(
+            f"{API}/happy-hours",
+            json={
+                "name": f"{tag}_hh_all",
+                "days": [0, 1, 2, 3, 4, 5, 6],
+                "start_time": "00:00",
+                "end_time": "23:59",
+                "percent_off": 20.0,
+                "category_ids": [],
+            },
+        )
         assert r.status_code == 200, r.text
         hh_id = r.json()["id"]
 
@@ -181,15 +209,19 @@ def test_visit_streak_bonus(client, tag):
         prev_w = w - 1 if w > 1 else 52
         prev_y = y if w > 1 else y - 1
         prev_key = f"{prev_y}-W{prev_w:02d}"
-        _db.members.update_one({"_id": ObjectId(m["id"])},
-                               {"$set": {"last_visit_week": prev_key, "streak_weeks": 1}})
+        _db.members.update_one(
+            {"_id": ObjectId(m["id"])},
+            {"$set": {"last_visit_week": prev_key, "streak_weeks": 1}},
+        )
         pts_pre = _get_summary(client, m["id"])["points"]
         _pay_dummy_order(client, m["id"], total=100.0)
         doc3 = _db.members.find_one({"_id": ObjectId(m["id"])})
         assert doc3["streak_weeks"] == 2, f"streak={doc3.get('streak_weeks')}"
         pts_post = _get_summary(client, m["id"])["points"]
         # base 10 pts + streak bonus 100 (2*50)
-        assert pts_post - pts_pre >= 110, f"expected >=110 gain (10 base + 100 streak), got {pts_post - pts_pre}"
+        assert (
+            pts_post - pts_pre >= 110
+        ), f"expected >=110 gain (10 base + 100 streak), got {pts_post - pts_pre}"
     finally:
         _cleanup_member(m["id"])
 
@@ -199,15 +231,19 @@ def test_feedback_voucher_and_dupe(client, tag):
     m = _create_member(client, f"{tag}_fb")
     try:
         oid_fake = str(ObjectId())
-        r = client.post(f"{API}/loyalty/feedback/{m['id']}",
-                        json={"rating": 5, "order_id": oid_fake, "comment": "great"})
+        r = client.post(
+            f"{API}/loyalty/feedback/{m['id']}",
+            json={"rating": 5, "order_id": oid_fake, "comment": "great"},
+        )
         assert r.status_code == 200, r.text
         v = r.json()["voucher"]
         assert v["discount_value"] == 20.0
         assert v["source"] == "feedback"
 
-        r2 = client.post(f"{API}/loyalty/feedback/{m['id']}",
-                         json={"rating": 4, "order_id": oid_fake})
+        r2 = client.post(
+            f"{API}/loyalty/feedback/{m['id']}",
+            json={"rating": 4, "order_id": oid_fake},
+        )
         assert r2.status_code == 400, f"expected 400 dupe, got {r2.status_code}"
     finally:
         _cleanup_member(m["id"])
@@ -219,7 +255,9 @@ def test_birth_month_persists(client, tag):
     try:
         r = client.get(f"{API}/members/{m['id']}")
         assert r.status_code == 200, r.text
-        assert r.json().get("member", {}).get("birth_month") == 3, f"birth_month not persisted: {r.json()}"
+        assert (
+            r.json().get("member", {}).get("birth_month") == 3
+        ), f"birth_month not persisted: {r.json()}"
     finally:
         _cleanup_member(m["id"])
 
@@ -229,15 +267,17 @@ def test_social_share_award_and_dupe(client, tag):
     m = _create_member(client, f"{tag}_ss")
     try:
         pts_before = _get_summary(client, m["id"])["points"]
-        r = client.post(f"{API}/loyalty/social-share/{m['id']}",
-                        json={"platform": "instagram"})
+        r = client.post(
+            f"{API}/loyalty/social-share/{m['id']}", json={"platform": "instagram"}
+        )
         assert r.status_code == 200, r.text
         assert r.json()["points_awarded"] == 25
         pts_after = _get_summary(client, m["id"])["points"]
         assert pts_after - pts_before == 25
 
-        r2 = client.post(f"{API}/loyalty/social-share/{m['id']}",
-                        json={"platform": "instagram"})
+        r2 = client.post(
+            f"{API}/loyalty/social-share/{m['id']}", json={"platform": "instagram"}
+        )
         assert r2.status_code == 400
     finally:
         _cleanup_member(m["id"])

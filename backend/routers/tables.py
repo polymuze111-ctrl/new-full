@@ -1,13 +1,14 @@
 """Orders + Tables router — extracted from server.py so payments live beside orders.
 Uses shared deps and delegates to server.py-level helpers for compute_totals/keg
 decrement to avoid circular imports."""
+
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
-from deps import db, _oid, serialize, sl
 from auth import make_current_user_dep
+from deps import _oid, db, serialize, sl
 from models import TableIn, TablePosIn
 
 get_current_user = make_current_user_dep(lambda: db)
@@ -16,7 +17,9 @@ router = APIRouter(prefix="/api", tags=["tables"])
 
 
 @router.get("/tables")
-async def list_tables(area_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def list_tables(
+    area_id: Optional[str] = None, user: dict = Depends(get_current_user)
+):
     q = {"area_id": area_id} if area_id else {}
     tables = sl(await db.tables.find(q).to_list(500))
     for t in tables:
@@ -54,7 +57,9 @@ async def create_table(body: TableIn, user: dict = Depends(get_current_user)):
 
 
 @router.patch("/tables/{table_id}")
-async def update_table(table_id: str, body: TablePosIn, user: dict = Depends(get_current_user)):
+async def update_table(
+    table_id: str, body: TablePosIn, user: dict = Depends(get_current_user)
+):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     await db.tables.update_one({"_id": _oid(table_id)}, {"$set": update})
     return serialize(await db.tables.find_one({"_id": _oid(table_id)}))
@@ -68,7 +73,9 @@ async def delete_table(table_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/tables/{tid}/clear")
 async def clear_table(tid: str, user: dict = Depends(get_current_user)):
-    await db.tables.update_one({"_id": _oid(tid)}, {"$set": {"status": "available", "current_order_id": None}})
+    await db.tables.update_one(
+        {"_id": _oid(tid)}, {"$set": {"status": "available", "current_order_id": None}}
+    )
     return {"ok": True}
 
 

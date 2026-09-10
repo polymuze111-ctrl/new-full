@@ -1,8 +1,12 @@
 """Iter 8 fix verification: (A) 422 error handling, (B) KDS product_id."""
+
 import os
+
 import requests
 
-BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://hk-bar-pos-pro.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get(
+    "REACT_APP_BACKEND_URL", "https://hk-bar-pos-pro.preview.emergentagent.com"
+).rstrip("/")
 API = f"{BASE}/api"
 
 CREDS = {"email": "polymuze111@gmail.com", "password": "admin123"}
@@ -32,17 +36,33 @@ def test_pay_422_invalid_method_returns_readable_detail():
     payload = {
         "order_type": "pick_up",
         "guests": 1,
-        "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                   "qty": 1, "variant": None, "modifiers": [], "course": p.get("course", "main"),
-                   "held": False, "notes": ""}],
-        "discount_type": "none", "discount_value": 0, "service_charge_pct": 10, "notes": "TEST_iter8",
+        "lines": [
+            {
+                "product_id": p["id"],
+                "name": p["name"],
+                "price": p["price"],
+                "qty": 1,
+                "variant": None,
+                "modifiers": [],
+                "course": p.get("course", "main"),
+                "held": False,
+                "notes": "",
+            }
+        ],
+        "discount_type": "none",
+        "discount_value": 0,
+        "service_charge_pct": 10,
+        "notes": "TEST_iter8",
     }
     r = s.post(f"{API}/orders", json=payload)
     assert r.status_code in (200, 201), r.text
     oid = r.json()["id"]
 
     # Trigger 422 - fake method
-    r = s.post(f"{API}/orders/{oid}/pay", json={"splits": [{"method": "fake_method_xyz", "amount": 100}]})
+    r = s.post(
+        f"{API}/orders/{oid}/pay",
+        json={"splits": [{"method": "fake_method_xyz", "amount": 100}]},
+    )
     assert r.status_code == 422, f"expected 422, got {r.status_code} {r.text}"
     body = r.json()
     assert "detail" in body
@@ -68,11 +88,25 @@ def test_kds_returns_product_id():
 
     p = next((x for x in prods if not x.get("eightysix")), prods[0])
     payload = {
-        "order_type": "pick_up", "guests": 1,
-        "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                   "qty": 1, "variant": None, "modifiers": [], "course": p.get("course", "main"),
-                   "held": False, "notes": ""}],
-        "discount_type": "none", "discount_value": 0, "service_charge_pct": 10, "notes": "TEST_iter8_kds",
+        "order_type": "pick_up",
+        "guests": 1,
+        "lines": [
+            {
+                "product_id": p["id"],
+                "name": p["name"],
+                "price": p["price"],
+                "qty": 1,
+                "variant": None,
+                "modifiers": [],
+                "course": p.get("course", "main"),
+                "held": False,
+                "notes": "",
+            }
+        ],
+        "discount_type": "none",
+        "discount_value": 0,
+        "service_charge_pct": 10,
+        "notes": "TEST_iter8_kds",
     }
     r = s.post(f"{API}/orders", json=payload)
     assert r.status_code in (200, 201), r.text
@@ -88,7 +122,9 @@ def test_kds_returns_product_id():
     assert mine, f"no kds ticket for order {oid}; kds={kds[:3]}"
     t = mine[0]
     assert "product_id" in t, f"kds ticket missing product_id: {t}"
-    assert t["product_id"] == p["id"], f"product_id mismatch {t['product_id']} != {p['id']}"
+    assert (
+        t["product_id"] == p["id"]
+    ), f"product_id mismatch {t['product_id']} != {p['id']}"
 
 
 def test_kds_86_flow_hides_from_public_menu():

@@ -4,8 +4,10 @@
 3. POST /api/kds/prep/bump (bump-all by product)
 4. Regression: iter 1-10 flows still green
 """
+
 import os
 import time
+
 import pytest
 import requests
 
@@ -61,7 +63,10 @@ def test_tables_crud_lifecycle(s):
     assert t["current_order_id"] is None
 
     # PATCH
-    r = s.patch(f"{API}/tables/{tid}", json={"name": "TEST_T_iter11_upd", "seats": 6, "shape": "rect"})
+    r = s.patch(
+        f"{API}/tables/{tid}",
+        json={"name": "TEST_T_iter11_upd", "seats": 6, "shape": "rect"},
+    )
     assert r.status_code == 200
     assert r.json()["name"] == "TEST_T_iter11_upd"
     assert r.json()["seats"] == 6
@@ -88,7 +93,16 @@ def test_tables_crud_lifecycle(s):
 # -------- 2. Keg pour logging + analytics endpoint --------
 def test_keg_pours_logged_and_returned(s):
     kegs = s.get(f"{API}/kegs").json()
-    keg = next((k for k in kegs if k["status"] == "on" and k.get("product") and k["current_ml"] >= k["ml_per_pour"] * 2), None)
+    keg = next(
+        (
+            k
+            for k in kegs
+            if k["status"] == "on"
+            and k.get("product")
+            and k["current_ml"] >= k["ml_per_pour"] * 2
+        ),
+        None,
+    )
     assert keg is not None, "no suitable keg"
     kid = keg["id"]
     pid = keg["product_id"]
@@ -110,15 +124,31 @@ def test_keg_pours_logged_and_returned(s):
 
     # place + pay
     payload = {
-        "order_type": "pick_up", "guests": 1,
-        "lines": [{"product_id": pid, "name": prod["name"], "price": prod["price"],
-                   "qty": qty, "variant": None, "modifiers": [], "course": "drink",
-                   "held": False, "notes": "TEST_iter11_pour"}],
-        "discount_type": "none", "discount_value": 0, "service_charge_pct": 10, "notes": "TEST_iter11_pour",
+        "order_type": "pick_up",
+        "guests": 1,
+        "lines": [
+            {
+                "product_id": pid,
+                "name": prod["name"],
+                "price": prod["price"],
+                "qty": qty,
+                "variant": None,
+                "modifiers": [],
+                "course": "drink",
+                "held": False,
+                "notes": "TEST_iter11_pour",
+            }
+        ],
+        "discount_type": "none",
+        "discount_value": 0,
+        "service_charge_pct": 10,
+        "notes": "TEST_iter11_pour",
     }
     o = s.post(f"{API}/orders", json=payload).json()
-    r = s.post(f"{API}/orders/{o['id']}/pay",
-               json={"method": "cash", "amount": o["total"], "tip": 0, "splits": []})
+    r = s.post(
+        f"{API}/orders/{o['id']}/pay",
+        json={"method": "cash", "amount": o["total"], "tip": 0, "splits": []},
+    )
     assert r.status_code == 200, r.text
 
     time.sleep(0.3)
@@ -131,7 +161,9 @@ def test_keg_pours_logged_and_returned(s):
     if len(all_pids_kegs) == 1:
         # single tap for this product — must be logged here
         delta_today = d1["days"][-1]["ml"] - baseline_today_ml
-        assert delta_today >= pour * qty, f"expected today delta>={pour*qty}, got {delta_today}"
+        assert (
+            delta_today >= pour * qty
+        ), f"expected today delta>={pour*qty}, got {delta_today}"
         assert d1["days"][-1]["day"] == today
     # pints consistency
     assert d1["total_pints"] == round(d1["total_ml"] / 568, 1)
@@ -154,16 +186,33 @@ def test_keg_pours_missing_days_filled_with_zero(s):
 # -------- 3. Prep Bump All --------
 def test_prep_bump_all_bumps_across_tables(s):
     prods = s.get(f"{API}/products").json()
-    food = next((p for p in prods if p.get("kind") == "food" and not p.get("eightysix")), prods[0])
-    line = lambda: {"product_id": food["id"], "name": food["name"], "price": food["price"],
-                    "qty": 1, "variant": None, "modifiers": [], "course": food.get("course", "main"),
-                    "held": True, "notes": ""}
+    food = next(
+        (p for p in prods if p.get("kind") == "food" and not p.get("eightysix")),
+        prods[0],
+    )
+    line = lambda: {
+        "product_id": food["id"],
+        "name": food["name"],
+        "price": food["price"],
+        "qty": 1,
+        "variant": None,
+        "modifiers": [],
+        "course": food.get("course", "main"),
+        "held": True,
+        "notes": "",
+    }
 
     oids = []
     for note in ["TEST_bumpall_A", "TEST_bumpall_B"]:
-        payload = {"order_type": "pick_up", "guests": 1,
-                   "lines": [line()],
-                   "discount_type": "none", "discount_value": 0, "service_charge_pct": 10, "notes": note}
+        payload = {
+            "order_type": "pick_up",
+            "guests": 1,
+            "lines": [line()],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
+            "notes": note,
+        }
         o = s.post(f"{API}/orders", json=payload).json()
         oids.append(o["id"])
         fr = s.post(f"{API}/orders/{o['id']}/fire")
@@ -172,7 +221,9 @@ def test_prep_bump_all_bumps_across_tables(s):
     time.sleep(0.3)
     # ensure prep view shows the product
     prep_before = s.get(f"{API}/kds/prep").json()
-    row_before = next((x for x in prep_before if x.get("product_id") == food["id"]), None)
+    row_before = next(
+        (x for x in prep_before if x.get("product_id") == food["id"]), None
+    )
     assert row_before is not None, "product missing from prep view before bump-all"
     assert row_before["total"] >= 2
 
@@ -194,14 +245,18 @@ def test_prep_bump_all_bumps_across_tables(s):
     for oid in oids:
         try:
             o = s.get(f"{API}/orders/{oid}").json()
-            s.post(f"{API}/orders/{oid}/pay",
-                   json={"method": "cash", "amount": o["total"], "tip": 0, "splits": []})
+            s.post(
+                f"{API}/orders/{oid}/pay",
+                json={"method": "cash", "amount": o["total"], "tip": 0, "splits": []},
+            )
         except Exception:
             pass
 
 
 def test_prep_bump_all_unknown_product(s):
-    r = s.post(f"{API}/kds/prep/bump", params={"product_id": "000000000000000000000000"})
+    r = s.post(
+        f"{API}/kds/prep/bump", params={"product_id": "000000000000000000000000"}
+    )
     assert r.status_code == 200, r.text
     assert r.json()["bumped"] == 0
 
@@ -218,17 +273,39 @@ def test_reports_summary(s):
 def test_order_lifecycle_split_payment(s):
     prods = s.get(f"{API}/products").json()
     p = next((x for x in prods if not x.get("eightysix")), prods[0])
-    payload = {"order_type": "pick_up", "guests": 1,
-               "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                          "qty": 2, "variant": None, "modifiers": [], "course": p.get("course", "main"),
-                          "held": False, "notes": ""}],
-               "discount_type": "none", "discount_value": 0, "service_charge_pct": 10, "notes": "TEST_iter11_life"}
+    payload = {
+        "order_type": "pick_up",
+        "guests": 1,
+        "lines": [
+            {
+                "product_id": p["id"],
+                "name": p["name"],
+                "price": p["price"],
+                "qty": 2,
+                "variant": None,
+                "modifiers": [],
+                "course": p.get("course", "main"),
+                "held": False,
+                "notes": "",
+            }
+        ],
+        "discount_type": "none",
+        "discount_value": 0,
+        "service_charge_pct": 10,
+        "notes": "TEST_iter11_life",
+    }
     o = s.post(f"{API}/orders", json=payload).json()
     total = o["total"]
     half = round(total / 2, 2)
-    body = {"method": "split", "amount": total, "tip": 0,
-            "splits": [{"method": "cash", "amount": half},
-                       {"method": "fps_qr", "amount": round(total - half, 2)}]}
+    body = {
+        "method": "split",
+        "amount": total,
+        "tip": 0,
+        "splits": [
+            {"method": "cash", "amount": half},
+            {"method": "fps_qr", "amount": round(total - half, 2)},
+        ],
+    }
     r = s.post(f"{API}/orders/{o['id']}/pay", json=body)
     assert r.status_code == 200, r.text
 

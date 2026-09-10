@@ -1,6 +1,8 @@
 """Idempotent seed data for HK Bar POS."""
+
 import os
 from datetime import datetime, timezone
+
 from auth import hash_password, verify_password
 
 
@@ -12,6 +14,9 @@ async def seed_all(db):
     await _seed_happy_hours(db)
     await _seed_kegs(db)
     await _seed_combos(db)
+    from seed_inventory import seed_inventory
+
+    await seed_inventory(db)
 
 
 async def _seed_combos(db):
@@ -27,7 +32,9 @@ async def _seed_combos(db):
     classic = await _find(["Old Fashioned", "Johnnie Walker Black"])
     draught = await _find(["Tsingtao", "Craft IPA", "San Miguel"])
     snacks = await _find(["Truffle Fries", "Chicken Wings", "Salt & Pepper Squid"])
-    mains = await _find(["Wagyu Burger", "Ribeye Steak 250g", "Fish & Chips", "Pad Thai"])
+    mains = await _find(
+        ["Wagyu Burger", "Ribeye Steak 250g", "Fish & Chips", "Pad Thai"]
+    )
 
     def ids(lst):
         return [str(p["_id"]) for p in lst]
@@ -35,37 +42,74 @@ async def _seed_combos(db):
     now = datetime.now(timezone.utc).isoformat()
     combos = []
     if signature and classic:
-        combos.append({
-            "name": "Cocktail Duo",
-            "product_ids": [],
-            "slots": [
-                {"operator": "or", "min_qty": 1, "max_qty": 1, "product_ids": ids(signature)},
-                {"operator": "or", "min_qty": 1, "max_qty": 1, "product_ids": ids(classic)},
-            ],
-            "discount_type": "percent", "discount_value": 15.0,
-            "active": True, "created_at": now,
-        })
+        combos.append(
+            {
+                "name": "Cocktail Duo",
+                "product_ids": [],
+                "slots": [
+                    {
+                        "operator": "or",
+                        "min_qty": 1,
+                        "max_qty": 1,
+                        "product_ids": ids(signature),
+                    },
+                    {
+                        "operator": "or",
+                        "min_qty": 1,
+                        "max_qty": 1,
+                        "product_ids": ids(classic),
+                    },
+                ],
+                "discount_type": "percent",
+                "discount_value": 15.0,
+                "active": True,
+                "created_at": now,
+            }
+        )
     if draught and snacks:
-        combos.append({
-            "name": "Beer & Bites",
-            "product_ids": [],
-            "slots": [
-                {"operator": "or", "min_qty": 1, "max_qty": 2, "product_ids": ids(draught)},
-                {"operator": "or", "min_qty": 1, "max_qty": 2, "product_ids": ids(snacks)},
-            ],
-            "discount_type": "cash", "discount_value": 25.0,
-            "active": True, "created_at": now,
-        })
+        combos.append(
+            {
+                "name": "Beer & Bites",
+                "product_ids": [],
+                "slots": [
+                    {
+                        "operator": "or",
+                        "min_qty": 1,
+                        "max_qty": 2,
+                        "product_ids": ids(draught),
+                    },
+                    {
+                        "operator": "or",
+                        "min_qty": 1,
+                        "max_qty": 2,
+                        "product_ids": ids(snacks),
+                    },
+                ],
+                "discount_type": "cash",
+                "discount_value": 25.0,
+                "active": True,
+                "created_at": now,
+            }
+        )
     if mains:
-        combos.append({
-            "name": "Steak Night · any 2 mains",
-            "product_ids": [],
-            "slots": [
-                {"operator": "or", "min_qty": 2, "max_qty": 2, "product_ids": ids(mains)},
-            ],
-            "discount_type": "cash", "discount_value": 40.0,
-            "active": True, "created_at": now,
-        })
+        combos.append(
+            {
+                "name": "Steak Night · any 2 mains",
+                "product_ids": [],
+                "slots": [
+                    {
+                        "operator": "or",
+                        "min_qty": 2,
+                        "max_qty": 2,
+                        "product_ids": ids(mains),
+                    },
+                ],
+                "discount_type": "cash",
+                "discount_value": 40.0,
+                "active": True,
+                "created_at": now,
+            }
+        )
 
     if combos:
         await db.combos.insert_many(combos)
@@ -75,9 +119,12 @@ async def _seed_kegs(db):
     if await db.kegs.count_documents({}) > 0:
         return
     from datetime import datetime, timezone
+
     # link kegs to beer products by name
     beer_names = ["Tsingtao", "Craft IPA", "San Miguel"]
-    prods = {p["name"]: p async for p in db.products.find({"name": {"$in": beer_names}})}
+    prods = {
+        p["name"]: p async for p in db.products.find({"name": {"$in": beer_names}})
+    }
     kegs = []
     tap = 1
     for beer_name, size, pour in [
@@ -90,17 +137,21 @@ async def _seed_kegs(db):
             continue
         # Two kegs per beer (main + backup) to demonstrate 35+ taps at scale
         for backup in [False, True]:
-            kegs.append({
-                "name": f"Tap {tap:02d} · {beer_name}{' (backup)' if backup else ''}",
-                "product_id": str(p["_id"]),
-                "size_ml": size,
-                "current_ml": int(size * (0.08 if (tap == 1) else 1.0)),  # tap 1 low for demo
-                "ml_per_pour": pour,
-                "threshold_pct": 10.0,
-                "status": "on",
-                "opened_at": datetime.now(timezone.utc).isoformat(),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            kegs.append(
+                {
+                    "name": f"Tap {tap:02d} · {beer_name}{' (backup)' if backup else ''}",
+                    "product_id": str(p["_id"]),
+                    "size_ml": size,
+                    "current_ml": int(
+                        size * (0.08 if (tap == 1) else 1.0)
+                    ),  # tap 1 low for demo
+                    "ml_per_pour": pour,
+                    "threshold_pct": 10.0,
+                    "status": "on",
+                    "opened_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             tap += 1
     if kegs:
         await db.kegs.insert_many(kegs)
@@ -121,15 +172,17 @@ async def _seed_users(db):
     for email, pwd, name, role, pin in users:
         existing = await db.users.find_one({"email": email})
         if not existing:
-            await db.users.insert_one({
-                "email": email,
-                "password_hash": hash_password(pwd),
-                "name": name,
-                "role": role,
-                "pin": pin,
-                "active": True,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            await db.users.insert_one(
+                {
+                    "email": email,
+                    "password_hash": hash_password(pwd),
+                    "name": name,
+                    "role": role,
+                    "pin": pin,
+                    "active": True,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
         else:
             update = {"role": role, "pin": pin, "name": name}
             if not verify_password(pwd, existing["password_hash"]):
@@ -144,7 +197,9 @@ async def _seed_areas_and_tables(db):
         if existing:
             areas[name] = existing["_id"]
         else:
-            r = await db.areas.insert_one({"name": name, "created_at": datetime.now(timezone.utc).isoformat()})
+            r = await db.areas.insert_one(
+                {"name": name, "created_at": datetime.now(timezone.utc).isoformat()}
+            )
             areas[name] = r.inserted_id
 
     if await db.tables.count_documents({}) > 0:
@@ -174,15 +229,21 @@ async def _seed_areas_and_tables(db):
     ]
     docs = []
     for area_name, tname, seats, x, y, w, h, shape in layout:
-        docs.append({
-            "area_id": str(areas[area_name]),
-            "name": tname,
-            "seats": seats,
-            "x": x, "y": y, "width": w, "height": h, "shape": shape,
-            "status": "available",
-            "current_order_id": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        docs.append(
+            {
+                "area_id": str(areas[area_name]),
+                "name": tname,
+                "seats": seats,
+                "x": x,
+                "y": y,
+                "width": w,
+                "height": h,
+                "shape": shape,
+                "status": "available",
+                "current_order_id": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     if docs:
         await db.tables.insert_many(docs)
 
@@ -203,75 +264,263 @@ async def _seed_menu(db):
     ]
     cat_ids = {}
     for name, kind, color in cats:
-        r = await db.categories.insert_one({
-            "name": name, "kind": kind, "color": color, "parent_id": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        r = await db.categories.insert_one(
+            {
+                "name": name,
+                "kind": kind,
+                "color": color,
+                "parent_id": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         cat_ids[name] = str(r.inserted_id)
 
     products = [
         # Cocktails
-        ("Hong Kong Sour", "Cocktails", 118, "drink", True,
-            [{"name": "Single", "price_delta": 0}, {"name": "Double", "price_delta": 40}],
-            [{"name": "No Ice", "price_delta": 0}, {"name": "Extra Lime", "price_delta": 5}]),
-        ("Neon Negroni", "Cocktails", 128, "drink", True,
-            [{"name": "Single", "price_delta": 0}, {"name": "Double", "price_delta": 45}],
-            [{"name": "Orange Peel", "price_delta": 0}]),
+        (
+            "Hong Kong Sour",
+            "Cocktails",
+            118,
+            "drink",
+            True,
+            [
+                {"name": "Single", "price_delta": 0},
+                {"name": "Double", "price_delta": 40},
+            ],
+            [
+                {"name": "No Ice", "price_delta": 0},
+                {"name": "Extra Lime", "price_delta": 5},
+            ],
+        ),
+        (
+            "Neon Negroni",
+            "Cocktails",
+            128,
+            "drink",
+            True,
+            [
+                {"name": "Single", "price_delta": 0},
+                {"name": "Double", "price_delta": 45},
+            ],
+            [{"name": "Orange Peel", "price_delta": 0}],
+        ),
         ("Lychee Martini", "Cocktails", 122, "drink", True, [], []),
-        ("Old Fashioned", "Cocktails", 138, "drink", True, [], [{"name": "Extra Cherry", "price_delta": 5}]),
+        (
+            "Old Fashioned",
+            "Cocktails",
+            138,
+            "drink",
+            True,
+            [],
+            [{"name": "Extra Cherry", "price_delta": 5}],
+        ),
         # Beer
-        ("Tsingtao", "Beer", 55, "drink", True,
-            [{"name": "Pint", "price_delta": 0}, {"name": "Tower", "price_delta": 220}, {"name": "Bucket x6", "price_delta": 250}],
-            []),
-        ("Craft IPA", "Beer", 75, "drink", True,
-            [{"name": "Pint", "price_delta": 0}, {"name": "Half", "price_delta": -30}], []),
-        ("San Miguel", "Beer", 50, "drink", True,
-            [{"name": "Bottle", "price_delta": 0}, {"name": "Bucket x6", "price_delta": 220}], []),
+        (
+            "Tsingtao",
+            "Beer",
+            55,
+            "drink",
+            True,
+            [
+                {"name": "Pint", "price_delta": 0},
+                {"name": "Tower", "price_delta": 220},
+                {"name": "Bucket x6", "price_delta": 250},
+            ],
+            [],
+        ),
+        (
+            "Craft IPA",
+            "Beer",
+            75,
+            "drink",
+            True,
+            [{"name": "Pint", "price_delta": 0}, {"name": "Half", "price_delta": -30}],
+            [],
+        ),
+        (
+            "San Miguel",
+            "Beer",
+            50,
+            "drink",
+            True,
+            [
+                {"name": "Bottle", "price_delta": 0},
+                {"name": "Bucket x6", "price_delta": 220},
+            ],
+            [],
+        ),
         # Wine
-        ("House Red Glass", "Wine", 78, "drink", True, [{"name": "Glass", "price_delta": 0}, {"name": "Bottle", "price_delta": 220}], []),
-        ("House White Glass", "Wine", 78, "drink", True, [{"name": "Glass", "price_delta": 0}, {"name": "Bottle", "price_delta": 220}], []),
+        (
+            "House Red Glass",
+            "Wine",
+            78,
+            "drink",
+            True,
+            [
+                {"name": "Glass", "price_delta": 0},
+                {"name": "Bottle", "price_delta": 220},
+            ],
+            [],
+        ),
+        (
+            "House White Glass",
+            "Wine",
+            78,
+            "drink",
+            True,
+            [
+                {"name": "Glass", "price_delta": 0},
+                {"name": "Bottle", "price_delta": 220},
+            ],
+            [],
+        ),
         # Spirits
-        ("Johnnie Walker Black", "Spirits", 95, "drink", True,
-            [{"name": "Single", "price_delta": 0}, {"name": "Double", "price_delta": 60}],
-            [{"name": "Neat", "price_delta": 0}, {"name": "On Rocks", "price_delta": 0}, {"name": "With Coke", "price_delta": 10}]),
-        ("Jose Cuervo", "Spirits", 85, "drink", True, [{"name": "Shot", "price_delta": 0}, {"name": "Double Shot", "price_delta": 50}], []),
+        (
+            "Johnnie Walker Black",
+            "Spirits",
+            95,
+            "drink",
+            True,
+            [
+                {"name": "Single", "price_delta": 0},
+                {"name": "Double", "price_delta": 60},
+            ],
+            [
+                {"name": "Neat", "price_delta": 0},
+                {"name": "On Rocks", "price_delta": 0},
+                {"name": "With Coke", "price_delta": 10},
+            ],
+        ),
+        (
+            "Jose Cuervo",
+            "Spirits",
+            85,
+            "drink",
+            True,
+            [
+                {"name": "Shot", "price_delta": 0},
+                {"name": "Double Shot", "price_delta": 50},
+            ],
+            [],
+        ),
         # Soft
-        ("Coke", "Soft Drinks", 35, "drink", False, [], [{"name": "No Ice", "price_delta": 0}]),
+        (
+            "Coke",
+            "Soft Drinks",
+            35,
+            "drink",
+            False,
+            [],
+            [{"name": "No Ice", "price_delta": 0}],
+        ),
         ("Sparkling Water", "Soft Drinks", 40, "drink", False, [], []),
         # Food
-        ("Truffle Fries", "Starters", 88, "food", False, [], [{"name": "Extra Parmesan", "price_delta": 10}]),
-        ("Chicken Wings", "Starters", 98, "food", False,
-            [{"name": "Original", "price_delta": 0}, {"name": "Hot", "price_delta": 0}, {"name": "BBQ", "price_delta": 0}], []),
+        (
+            "Truffle Fries",
+            "Starters",
+            88,
+            "food",
+            False,
+            [],
+            [{"name": "Extra Parmesan", "price_delta": 10}],
+        ),
+        (
+            "Chicken Wings",
+            "Starters",
+            98,
+            "food",
+            False,
+            [
+                {"name": "Original", "price_delta": 0},
+                {"name": "Hot", "price_delta": 0},
+                {"name": "BBQ", "price_delta": 0},
+            ],
+            [],
+        ),
         ("Salt & Pepper Squid", "Starters", 118, "food", False, [], []),
-        ("Wagyu Burger", "Mains", 168, "food", False,
-            [{"name": "Medium Rare", "price_delta": 0}, {"name": "Medium", "price_delta": 0}, {"name": "Well Done", "price_delta": 0}],
-            [{"name": "Add Bacon", "price_delta": 20}, {"name": "Add Cheese", "price_delta": 15}]),
-        ("Ribeye Steak 250g", "Mains", 288, "food", False,
-            [{"name": "Rare", "price_delta": 0}, {"name": "Medium Rare", "price_delta": 0}, {"name": "Medium", "price_delta": 0}, {"name": "Well Done", "price_delta": 0}],
-            [{"name": "Peppercorn Sauce", "price_delta": 25}, {"name": "Mushroom Sauce", "price_delta": 25}]),
+        (
+            "Wagyu Burger",
+            "Mains",
+            168,
+            "food",
+            False,
+            [
+                {"name": "Medium Rare", "price_delta": 0},
+                {"name": "Medium", "price_delta": 0},
+                {"name": "Well Done", "price_delta": 0},
+            ],
+            [
+                {"name": "Add Bacon", "price_delta": 20},
+                {"name": "Add Cheese", "price_delta": 15},
+            ],
+        ),
+        (
+            "Ribeye Steak 250g",
+            "Mains",
+            288,
+            "food",
+            False,
+            [
+                {"name": "Rare", "price_delta": 0},
+                {"name": "Medium Rare", "price_delta": 0},
+                {"name": "Medium", "price_delta": 0},
+                {"name": "Well Done", "price_delta": 0},
+            ],
+            [
+                {"name": "Peppercorn Sauce", "price_delta": 25},
+                {"name": "Mushroom Sauce", "price_delta": 25},
+            ],
+        ),
         ("Fish & Chips", "Mains", 148, "food", False, [], []),
-        ("Pad Thai", "Mains", 118, "food", False, [{"name": "Chicken", "price_delta": 0}, {"name": "Prawn", "price_delta": 25}, {"name": "Veg", "price_delta": -10}], []),
+        (
+            "Pad Thai",
+            "Mains",
+            118,
+            "food",
+            False,
+            [
+                {"name": "Chicken", "price_delta": 0},
+                {"name": "Prawn", "price_delta": 25},
+                {"name": "Veg", "price_delta": -10},
+            ],
+            [],
+        ),
         ("Coleslaw", "Sides", 38, "food", False, [], []),
         ("Onion Rings", "Sides", 48, "food", False, [], []),
-        ("Chocolate Lava", "Desserts", 78, "food", False, [], [{"name": "Ice Cream", "price_delta": 15}]),
+        (
+            "Chocolate Lava",
+            "Desserts",
+            78,
+            "food",
+            False,
+            [],
+            [{"name": "Ice Cream", "price_delta": 15}],
+        ),
     ]
     docs = []
-    course_map = {"Starters": "starter", "Mains": "main", "Sides": "side", "Desserts": "dessert"}
+    course_map = {
+        "Starters": "starter",
+        "Mains": "main",
+        "Sides": "side",
+        "Desserts": "dessert",
+    }
     for name, cat, price, kind, hh, variants, mods in products:
-        docs.append({
-            "name": name,
-            "category_id": cat_ids[cat],
-            "price": price,
-            "kind": kind,
-            "course": course_map.get(cat, "drink"),
-            "variants": variants,
-            "modifiers": mods,
-            "happy_hour_eligible": hh,
-            "description": "",
-            "image": None,
-            "active": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        docs.append(
+            {
+                "name": name,
+                "category_id": cat_ids[cat],
+                "price": price,
+                "kind": kind,
+                "course": course_map.get(cat, "drink"),
+                "variants": variants,
+                "modifiers": mods,
+                "happy_hour_eligible": hh,
+                "description": "",
+                "image": None,
+                "active": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     if docs:
         await db.products.insert_many(docs)
 
@@ -288,13 +537,21 @@ async def _seed_members(db):
     ]
     docs = []
     for n, p, e, t in members:
-        docs.append({
-            "name": n, "phone": p, "email": e, "tier": t, "notes": "",
-            "lifetime_spend": 0.0, "visits": 0, "points": 0,
-            "favorite_items": [],
-            "avg_duration_min": 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        docs.append(
+            {
+                "name": n,
+                "phone": p,
+                "email": e,
+                "tier": t,
+                "notes": "",
+                "lifetime_spend": 0.0,
+                "visits": 0,
+                "points": 0,
+                "favorite_items": [],
+                "avg_duration_min": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     if docs:
         await db.members.insert_many(docs)
 
@@ -305,13 +562,15 @@ async def _seed_happy_hours(db):
     cocktails = await db.categories.find_one({"name": "Cocktails"})
     beer = await db.categories.find_one({"name": "Beer"})
     cat_ids = [str(c["_id"]) for c in [cocktails, beer] if c]
-    await db.happy_hours.insert_one({
-        "name": "Daily Happy Hour",
-        "days": [0, 1, 2, 3, 4, 5, 6],
-        "start_time": "16:00",
-        "end_time": "21:00",
-        "percent_off": 20.0,
-        "category_ids": cat_ids,
-        "active": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    await db.happy_hours.insert_one(
+        {
+            "name": "Daily Happy Hour",
+            "days": [0, 1, 2, 3, 4, 5, 6],
+            "start_time": "16:00",
+            "end_time": "21:00",
+            "percent_off": 20.0,
+            "category_ids": cat_ids,
+            "active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )

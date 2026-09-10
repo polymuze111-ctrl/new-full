@@ -1,15 +1,19 @@
 """Iteration 6 regression tests: 86 product, multi-tier HH, HK payments."""
+
 import os
-import requests
-import pytest
 from datetime import datetime, timedelta, timezone
+
+import pytest
+import requests
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 HK = timezone(timedelta(hours=8))
 
 
 def _login(email, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": email, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"email": email, "password": password}
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -35,11 +39,16 @@ def any_product(admin_h):
 
 # ---------- 86 ----------
 class TestEightySix:
-    def test_toggle_on_then_off_and_public_menu_hides(self, admin_h, any_product, any_table):
+    def test_toggle_on_then_off_and_public_menu_hides(
+        self, admin_h, any_product, any_table
+    ):
         pid = any_product["id"]
         # On
-        r = requests.post(f"{BASE_URL}/api/products/{pid}/eightysix",
-                          params={"on": "true"}, headers=admin_h)
+        r = requests.post(
+            f"{BASE_URL}/api/products/{pid}/eightysix",
+            params={"on": "true"},
+            headers=admin_h,
+        )
         assert r.status_code == 200, r.text
         assert r.json()["eightysix"] is True
 
@@ -54,8 +63,11 @@ class TestEightySix:
         assert found and found.get("eightysix") is True
 
         # Un-86
-        r2 = requests.post(f"{BASE_URL}/api/products/{pid}/eightysix",
-                           params={"on": "false"}, headers=admin_h)
+        r2 = requests.post(
+            f"{BASE_URL}/api/products/{pid}/eightysix",
+            params={"on": "false"},
+            headers=admin_h,
+        )
         assert r2.status_code == 200
         assert r2.json()["eightysix"] is False
         pub2 = requests.get(f"{BASE_URL}/api/public/menu/{any_table['id']}").json()
@@ -78,19 +90,35 @@ class TestMultiTierHH:
 
         rule_ids = []
         for name, pct in [("TEST_MT_15", 15), ("TEST_MT_25", 25)]:
-            r = requests.post(f"{BASE_URL}/api/happy-hours", headers=admin_h, json={
-                "name": name, "start_time": start, "end_time": end,
-                "percent_off": pct, "days": [wday], "category_ids": [cat_id],
-            })
+            r = requests.post(
+                f"{BASE_URL}/api/happy-hours",
+                headers=admin_h,
+                json={
+                    "name": name,
+                    "start_time": start,
+                    "end_time": end,
+                    "percent_off": pct,
+                    "days": [wday],
+                    "category_ids": [cat_id],
+                },
+            )
             assert r.status_code == 200, r.text
             rule_ids.append(r.json()["id"])
 
         try:
-            act2 = requests.get(f"{BASE_URL}/api/happy-hours/active", headers=admin_h).json()
+            act2 = requests.get(
+                f"{BASE_URL}/api/happy-hours/active", headers=admin_h
+            ).json()
             names = [h["name"] for h in act2["active"]]
-            assert "TEST_MT_15" in names and "TEST_MT_25" in names, f"both rules should be active; got {names}"
+            assert (
+                "TEST_MT_15" in names and "TEST_MT_25" in names
+            ), f"both rules should be active; got {names}"
             # engine returns raw list; frontend picks max — verify both percents present
-            pcts = [h["percent_off"] for h in act2["active"] if h["name"].startswith("TEST_MT_")]
+            pcts = [
+                h["percent_off"]
+                for h in act2["active"]
+                if h["name"].startswith("TEST_MT_")
+            ]
             assert max(pcts) == 25
         finally:
             for rid in rule_ids:
@@ -99,16 +127,35 @@ class TestMultiTierHH:
 
 # ---------- HK Payment methods ----------
 class TestHKPayments:
-    METHODS = ["cash", "card", "octopus", "fps_qr", "alipayhk",
-               "wechatpay_hk", "payme", "unionpay"]
+    METHODS = [
+        "cash",
+        "card",
+        "octopus",
+        "fps_qr",
+        "alipayhk",
+        "wechatpay_hk",
+        "payme",
+        "unionpay",
+    ]
 
     def _make_order(self, admin_h, prod):
         payload = {
-            "order_type": "dine_in", "guests": 1,
-            "lines": [{"product_id": prod["id"], "name": prod["name"], "price": prod["price"],
-                       "qty": 1, "modifiers": [], "course": prod.get("course", "main"),
-                       "kind": prod.get("kind", "food")}],
-            "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
+            "order_type": "dine_in",
+            "guests": 1,
+            "lines": [
+                {
+                    "product_id": prod["id"],
+                    "name": prod["name"],
+                    "price": prod["price"],
+                    "qty": 1,
+                    "modifiers": [],
+                    "course": prod.get("course", "main"),
+                    "kind": prod.get("kind", "food"),
+                }
+            ],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
         }
         r = requests.post(f"{BASE_URL}/api/orders", json=payload, headers=admin_h)
         assert r.status_code == 200, r.text
@@ -117,11 +164,15 @@ class TestHKPayments:
     @pytest.mark.parametrize("method", METHODS)
     def test_pay_method(self, admin_h, any_product, method):
         order = self._make_order(admin_h, any_product)
-        pay = requests.post(f"{BASE_URL}/api/orders/{order['id']}/pay",
-                            json={"method": method, "amount": order["total"], "tip": 0, "splits": []},
-                            headers=admin_h)
+        pay = requests.post(
+            f"{BASE_URL}/api/orders/{order['id']}/pay",
+            json={"method": method, "amount": order["total"], "tip": 0, "splits": []},
+            headers=admin_h,
+        )
         assert pay.status_code == 200, f"{method}: {pay.text}"
-        after = requests.get(f"{BASE_URL}/api/orders/{order['id']}", headers=admin_h).json()
+        after = requests.get(
+            f"{BASE_URL}/api/orders/{order['id']}", headers=admin_h
+        ).json()
         assert after["status"] == "paid"
         assert after["payment"]["method"] == method
 
@@ -133,12 +184,20 @@ class TestHKPayments:
             {"method": "octopus", "amount": half},
             {"method": "fps_qr", "amount": rem},
         ]
-        pay = requests.post(f"{BASE_URL}/api/orders/{order['id']}/pay",
-                            json={"method": "split", "amount": order["total"],
-                                  "tip": 0, "splits": splits},
-                            headers=admin_h)
+        pay = requests.post(
+            f"{BASE_URL}/api/orders/{order['id']}/pay",
+            json={
+                "method": "split",
+                "amount": order["total"],
+                "tip": 0,
+                "splits": splits,
+            },
+            headers=admin_h,
+        )
         assert pay.status_code == 200, pay.text
-        after = requests.get(f"{BASE_URL}/api/orders/{order['id']}", headers=admin_h).json()
+        after = requests.get(
+            f"{BASE_URL}/api/orders/{order['id']}", headers=admin_h
+        ).json()
         assert after["status"] == "paid"
         assert after["payment"]["method"] == "split"
         assert len(after["payment"].get("splits", [])) == 2

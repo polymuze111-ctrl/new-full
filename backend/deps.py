@@ -1,7 +1,10 @@
 """Shared FastAPI dependencies (splits server.py into routers)."""
+
 import os
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
+
 from bson import ObjectId
 from fastapi import HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,9 +22,9 @@ def _oid(x: str) -> ObjectId:
         raise HTTPException(status_code=400, detail="Invalid id")
 
 
-def serialize(doc: dict) -> dict:
+def serialize(doc: Optional[dict]) -> dict:
     if not doc:
-        return doc
+        return {}
     doc = dict(doc)
     if "_id" in doc:
         doc["id"] = str(doc.pop("_id"))

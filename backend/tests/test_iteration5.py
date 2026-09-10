@@ -5,15 +5,19 @@ Covers:
 - pay_order with method='wallet' returns 200 and payment.change == 0
 - public_menu with `t = None` init: 404 on bad OID must not raise 500
 """
+
 import os
-import requests
+
 import pytest
+import requests
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 
 
 def _login(email, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": email, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"email": email, "password": password}
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -28,8 +32,12 @@ class TestComputeTotalsDefaults:
     def test_empty_lines_zero_everything(self, admin_h):
         # POST an order with empty lines and discount_type='none' — every total must be 0
         payload = {
-            "order_type": "dine_in", "guests": 1, "lines": [],
-            "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
+            "order_type": "dine_in",
+            "guests": 1,
+            "lines": [],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
         }
         r = requests.post(f"{BASE_URL}/api/orders", json=payload, headers=admin_h)
         assert r.status_code == 200, r.text
@@ -40,7 +48,11 @@ class TestComputeTotalsDefaults:
         assert d["service_charge"] == 0
         assert d["total"] == 0
         # cleanup — void
-        requests.patch(f"{BASE_URL}/api/orders/{d['id']}", json={"status": "voided"}, headers=admin_h)
+        requests.patch(
+            f"{BASE_URL}/api/orders/{d['id']}",
+            json={"status": "voided"},
+            headers=admin_h,
+        )
 
     def test_discount_type_none_leaves_discount_zero(self, admin_h):
         # order with lines but discount_type='none' — discount must stay 0
@@ -48,18 +60,35 @@ class TestComputeTotalsDefaults:
         assert prods, "seed products required"
         p = prods[0]
         payload = {
-            "order_type": "dine_in", "guests": 1,
-            "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                       "qty": 2, "modifiers": [], "course": p.get("course", "main"),
-                       "kind": p.get("kind", "food")}],
-            "discount_type": "none", "discount_value": 50, "service_charge_pct": 10,
+            "order_type": "dine_in",
+            "guests": 1,
+            "lines": [
+                {
+                    "product_id": p["id"],
+                    "name": p["name"],
+                    "price": p["price"],
+                    "qty": 2,
+                    "modifiers": [],
+                    "course": p.get("course", "main"),
+                    "kind": p.get("kind", "food"),
+                }
+            ],
+            "discount_type": "none",
+            "discount_value": 50,
+            "service_charge_pct": 10,
         }
         r = requests.post(f"{BASE_URL}/api/orders", json=payload, headers=admin_h)
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["discount"] == 0, f"discount_type=none should leave discount=0, got {d['discount']}"
+        assert (
+            d["discount"] == 0
+        ), f"discount_type=none should leave discount=0, got {d['discount']}"
         assert d["subtotal"] == round(p["price"] * 2, 2)
-        requests.patch(f"{BASE_URL}/api/orders/{d['id']}", json={"status": "voided"}, headers=admin_h)
+        requests.patch(
+            f"{BASE_URL}/api/orders/{d['id']}",
+            json={"status": "voided"},
+            headers=admin_h,
+        )
 
 
 # ---------- pay_order defensive change init ----------
@@ -68,21 +97,33 @@ class TestPayOrderWalletChange:
         prods = requests.get(f"{BASE_URL}/api/products", headers=admin_h).json()
         p = prods[0]
         payload = {
-            "order_type": "dine_in", "guests": 1,
-            "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                       "qty": 1, "modifiers": [], "course": p.get("course", "main"),
-                       "kind": p.get("kind", "food")}],
-            "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
+            "order_type": "dine_in",
+            "guests": 1,
+            "lines": [
+                {
+                    "product_id": p["id"],
+                    "name": p["name"],
+                    "price": p["price"],
+                    "qty": 1,
+                    "modifiers": [],
+                    "course": p.get("course", "main"),
+                    "kind": p.get("kind", "food"),
+                }
+            ],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
         }
         r = requests.post(f"{BASE_URL}/api/orders", json=payload, headers=admin_h)
         assert r.status_code == 200, r.text
         order = r.json()
         oid = order["id"]
         # pay with wallet — neither cash nor split — change branch untouched but must be 0
-        pay = requests.post(f"{BASE_URL}/api/orders/{oid}/pay",
-                            json={"method": "wallet", "amount": order["total"],
-                                  "tip": 0, "splits": []},
-                            headers=admin_h)
+        pay = requests.post(
+            f"{BASE_URL}/api/orders/{oid}/pay",
+            json={"method": "wallet", "amount": order["total"], "tip": 0, "splits": []},
+            headers=admin_h,
+        )
         assert pay.status_code == 200, pay.text
         # re-fetch order to confirm payment persisted
         after = requests.get(f"{BASE_URL}/api/orders/{oid}", headers=admin_h).json()
@@ -94,19 +135,31 @@ class TestPayOrderWalletChange:
         prods = requests.get(f"{BASE_URL}/api/products", headers=admin_h).json()
         p = prods[0]
         payload = {
-            "order_type": "dine_in", "guests": 1,
-            "lines": [{"product_id": p["id"], "name": p["name"], "price": p["price"],
-                       "qty": 1, "modifiers": [], "course": p.get("course", "main"),
-                       "kind": p.get("kind", "food")}],
-            "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
+            "order_type": "dine_in",
+            "guests": 1,
+            "lines": [
+                {
+                    "product_id": p["id"],
+                    "name": p["name"],
+                    "price": p["price"],
+                    "qty": 1,
+                    "modifiers": [],
+                    "course": p.get("course", "main"),
+                    "kind": p.get("kind", "food"),
+                }
+            ],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
         }
         r = requests.post(f"{BASE_URL}/api/orders", json=payload, headers=admin_h)
         order = r.json()
         oid = order["id"]
-        pay = requests.post(f"{BASE_URL}/api/orders/{oid}/pay",
-                            json={"method": "card", "amount": order["total"],
-                                  "tip": 0, "splits": []},
-                            headers=admin_h)
+        pay = requests.post(
+            f"{BASE_URL}/api/orders/{oid}/pay",
+            json={"method": "card", "amount": order["total"], "tip": 0, "splits": []},
+            headers=admin_h,
+        )
         assert pay.status_code == 200, pay.text
         after = requests.get(f"{BASE_URL}/api/orders/{oid}", headers=admin_h).json()
         assert after["payment"]["change"] == 0

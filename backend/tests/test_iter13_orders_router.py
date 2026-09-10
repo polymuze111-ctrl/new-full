@@ -8,10 +8,12 @@ Covers:
   • /api/orders/{id}/bump/{index} and /api/orders/{id}/fire respond
   • /api/orders, /api/tables, /api/kegs list endpoints still work
 """
+
 import os
+from pathlib import Path
+
 import pytest
 import requests
-from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -62,7 +64,13 @@ def test_kegs_list(sess):
 def test_create_order_hh_line_excludes_order_discount(sess, products):
     p1, p2 = products[0], products[1]
     lines = [
-        {"product_id": p1["id"], "name": p1["name"], "price": 40, "qty": 1, "hh_pct": 20},
+        {
+            "product_id": p1["id"],
+            "name": p1["name"],
+            "price": 40,
+            "qty": 1,
+            "hh_pct": 20,
+        },
         {"product_id": p2["id"], "name": p2["name"], "price": 100, "qty": 1},
     ]
     body = {
@@ -143,10 +151,17 @@ def test_two_overlapping_combos_only_best(sess, products):
         ("TEST_ITER13_SMALL", [p1["id"], p2["id"]], 10),
         ("TEST_ITER13_BIG", [p2["id"], p3["id"]], 50),
     ]:
-        r = sess.post(f"{API}/combos", json={
-            "name": name, "product_ids": pids,
-            "discount_type": "cash", "discount_value": v, "active": True,
-        }, timeout=15)
+        r = sess.post(
+            f"{API}/combos",
+            json={
+                "name": name,
+                "product_ids": pids,
+                "discount_type": "cash",
+                "discount_value": v,
+                "active": True,
+            },
+            timeout=15,
+        )
         assert r.status_code in (200, 201), r.text
         created.append(r.json()["id"])
 
@@ -156,10 +171,17 @@ def test_two_overlapping_combos_only_best(sess, products):
             {"product_id": p2["id"], "name": p2["name"], "price": 100, "qty": 1},
             {"product_id": p3["id"], "name": p3["name"], "price": 100, "qty": 1},
         ]
-        r = sess.post(f"{API}/orders", json={
-            "order_type": "dine_in", "lines": lines,
-            "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
-        }, timeout=15)
+        r = sess.post(
+            f"{API}/orders",
+            json={
+                "order_type": "dine_in",
+                "lines": lines,
+                "discount_type": "none",
+                "discount_value": 0,
+                "service_charge_pct": 10,
+            },
+            timeout=15,
+        )
         assert r.status_code == 200, r.text
         d = r.json()
         applied_names = [c["name"] for c in d["combos_applied"]]
@@ -175,20 +197,32 @@ def test_two_overlapping_combos_only_best(sess, products):
 def test_patch_order_recomputes_totals(sess, products):
     p1, p2 = products[0], products[1]
     # create simple order
-    r = sess.post(f"{API}/orders", json={
-        "order_type": "dine_in",
-        "lines": [
-            {"product_id": p1["id"], "name": p1["name"], "price": 100, "qty": 1},
-        ],
-        "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
-    }, timeout=15)
+    r = sess.post(
+        f"{API}/orders",
+        json={
+            "order_type": "dine_in",
+            "lines": [
+                {"product_id": p1["id"], "name": p1["name"], "price": 100, "qty": 1},
+            ],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
+        },
+        timeout=15,
+    )
     assert r.status_code == 200, r.text
     oid = r.json()["id"]
 
     # PATCH — add HH line + non-HH line + 20% manual discount
     patch_body = {
         "lines": [
-            {"product_id": p1["id"], "name": p1["name"], "price": 40, "qty": 1, "hh_pct": 20},
+            {
+                "product_id": p1["id"],
+                "name": p1["name"],
+                "price": 40,
+                "qty": 1,
+                "hh_pct": 20,
+            },
             {"product_id": p2["id"], "name": p2["name"], "price": 100, "qty": 1},
         ],
         "discount_type": "percent",
@@ -207,12 +241,26 @@ def test_patch_order_recomputes_totals(sess, products):
 def test_bump_fire_pay_flow(sess, products):
     p1 = products[0]
     # create order with 1 held line
-    r = sess.post(f"{API}/orders", json={
-        "order_type": "dine_in",
-        "lines": [{"product_id": p1["id"], "name": p1["name"], "price": 60, "qty": 1,
-                   "held": True, "course": "main"}],
-        "discount_type": "none", "discount_value": 0, "service_charge_pct": 10,
-    }, timeout=15)
+    r = sess.post(
+        f"{API}/orders",
+        json={
+            "order_type": "dine_in",
+            "lines": [
+                {
+                    "product_id": p1["id"],
+                    "name": p1["name"],
+                    "price": 60,
+                    "qty": 1,
+                    "held": True,
+                    "course": "main",
+                }
+            ],
+            "discount_type": "none",
+            "discount_value": 0,
+            "service_charge_pct": 10,
+        },
+        timeout=15,
+    )
     assert r.status_code == 200, r.text
     oid = r.json()["id"]
     total = r.json()["total"]
@@ -228,8 +276,15 @@ def test_bump_fire_pay_flow(sess, products):
     assert r.json().get("ok") is True
 
     # pay cash
-    r = sess.post(f"{API}/orders/{oid}/pay", json={
-        "method": "cash", "amount": total, "tip": 0, "splits": [],
-    }, timeout=15)
+    r = sess.post(
+        f"{API}/orders/{oid}/pay",
+        json={
+            "method": "cash",
+            "amount": total,
+            "tip": 0,
+            "splits": [],
+        },
+        timeout=15,
+    )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "paid"

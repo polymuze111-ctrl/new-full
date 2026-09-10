@@ -8,10 +8,11 @@ Rules verified:
   3. Order-level manual discount base = subtotal of lines NOT locked by HH or a
      combo.
 """
-import os, sys
+
+import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
-import pytest
 
 BACKEND = Path(__file__).resolve().parent.parent
 load_dotenv(BACKEND / ".env")
@@ -20,16 +21,27 @@ from routers.orders import _compute_totals
 
 
 def _line(pid, price, qty=1, hh_pct=0):
-    return {"product_id": pid, "name": pid, "price": price, "qty": qty, "hh_pct": hh_pct}
+    return {
+        "product_id": pid,
+        "name": pid,
+        "price": price,
+        "qty": qty,
+        "hh_pct": hh_pct,
+    }
 
 
 def test_hh_line_skips_order_discount_and_combos():
     """A pint priced at HH should NOT feed a combo NOR the -20% cash discount."""
     lines = [_line("beer", 40, hh_pct=20), _line("burger", 100)]
-    combos = [{
-        "name": "Beer+Burger", "product_ids": ["beer", "burger"],
-        "discount_type": "cash", "discount_value": 30, "active": True,
-    }]
+    combos = [
+        {
+            "name": "Beer+Burger",
+            "product_ids": ["beer", "burger"],
+            "discount_type": "cash",
+            "discount_value": 30,
+            "active": True,
+        }
+    ]
     t = _compute_totals(lines, "percent", 20, 10, combos)
     # subtotal 140. HH-locked beer excluded from combo -> combo doesn't match.
     # Order 20% applies only to burger (100) -> disc = 20.
@@ -43,10 +55,15 @@ def test_hh_line_skips_order_discount_and_combos():
 def test_combo_locks_lines_from_manual_discount():
     """Combo-locked products must not shrink the order-level discount base."""
     lines = [_line("A", 100), _line("B", 200), _line("C", 50)]
-    combos = [{
-        "name": "AB Deal", "product_ids": ["A", "B"],
-        "discount_type": "cash", "discount_value": 40, "active": True,
-    }]
+    combos = [
+        {
+            "name": "AB Deal",
+            "product_ids": ["A", "B"],
+            "discount_type": "cash",
+            "discount_value": 40,
+            "active": True,
+        }
+    ]
     t = _compute_totals(lines, "percent", 10, 10, combos)
     # subtotal 350; combo matches locking A+B -> combo_discount 40.
     # Order 10% applies only to C (50) -> discount = 5.
@@ -60,10 +77,20 @@ def test_two_overlapping_combos_only_best_wins():
     """Second combo sharing any product must be skipped (mutual exclusivity)."""
     lines = [_line("X", 100), _line("Y", 100), _line("Z", 100)]
     combos = [
-        {"name": "Small", "product_ids": ["X", "Y"],
-         "discount_type": "cash", "discount_value": 10, "active": True},
-        {"name": "Big", "product_ids": ["Y", "Z"],
-         "discount_type": "cash", "discount_value": 50, "active": True},
+        {
+            "name": "Small",
+            "product_ids": ["X", "Y"],
+            "discount_type": "cash",
+            "discount_value": 10,
+            "active": True,
+        },
+        {
+            "name": "Big",
+            "product_ids": ["Y", "Z"],
+            "discount_type": "cash",
+            "discount_value": 50,
+            "active": True,
+        },
     ]
     t = _compute_totals(lines, "none", 0, 10, combos)
     # "Big" wins (50), locks Y+Z; "Small" needs Y -> overlap -> skipped.

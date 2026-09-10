@@ -1,12 +1,12 @@
 """Kegs router — 35+ tap tracker with volume + low-level alerts + prep-view aggregation."""
+
 from datetime import datetime, timezone
-from typing import Optional, Literal, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from deps import db, _oid, serialize, sl
 from auth import make_current_user_dep
+from deps import _oid, db, serialize
 
 get_current_user = make_current_user_dep(lambda: db)
 
@@ -28,7 +28,11 @@ async def list_kegs(user: dict = Depends(get_current_user)):
     out = []
     for d in docs:
         s = serialize(d)
-        s["product"] = serialize(prods.get(d.get("product_id"))) if prods.get(d.get("product_id")) else None
+        s["product"] = (
+            serialize(prods.get(d.get("product_id")))
+            if prods.get(d.get("product_id"))
+            else None
+        )
         pct = 0
         if s.get("size_ml"):
             pct = round(100 * (s.get("current_ml", 0) or 0) / s["size_ml"], 1)
@@ -41,12 +45,14 @@ async def list_kegs(user: dict = Depends(get_current_user)):
 @router.post("/kegs")
 async def create_keg(body: KegIn, user: dict = Depends(get_current_user)):
     doc = body.model_dump()
-    doc.update({
-        "current_ml": body.size_ml,
-        "status": "on",
-        "opened_at": datetime.now(timezone.utc).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    doc.update(
+        {
+            "current_ml": body.size_ml,
+            "status": "on",
+            "opened_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     r = await db.kegs.insert_one(doc)
     doc["_id"] = r.inserted_id
     return serialize(doc)
@@ -66,18 +72,22 @@ async def install_new_keg(kid: str, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Not found")
     await db.kegs.update_one(
         {"_id": _oid(kid)},
-        {"$set": {
-            "current_ml": k["size_ml"],
-            "status": "on",
-            "opened_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {
+            "$set": {
+                "current_ml": k["size_ml"],
+                "status": "on",
+                "opened_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
     return serialize(await db.kegs.find_one({"_id": _oid(kid)}))
 
 
 @router.post("/kegs/{kid}/blown")
 async def mark_blown(kid: str, user: dict = Depends(get_current_user)):
-    await db.kegs.update_one({"_id": _oid(kid)}, {"$set": {"status": "blown", "current_ml": 0}})
+    await db.kegs.update_one(
+        {"_id": _oid(kid)}, {"$set": {"status": "blown", "current_ml": 0}}
+    )
     return serialize(await db.kegs.find_one({"_id": _oid(kid)}))
 
 
@@ -94,17 +104,17 @@ async def decrement_kegs_for_order(order: dict):
     Every pour is logged to keg_pours for the 7-day velocity analytics."""
     kegs = await db.kegs.find({"status": "on"}).to_list(200)
     kegs.sort(key=lambda k: (k.get("current_ml") or 0))
-    by_pid = {}
+    by_pid: dict = {}
     for k in kegs:
         by_pid.setdefault(k["product_id"], k)
     now_iso = datetime.now(timezone.utc).isoformat()
     pour_docs = []
-    for l in order.get("lines", []):
-        pid = l.get("product_id")
+    for line in order.get("lines", []):
+        pid = line.get("product_id")
         if pid not in by_pid:
             continue
         k = by_pid[pid]
-        qty = l.get("qty") or 1
+        qty = line.get("qty") or 1
         pour = (k.get("ml_per_pour") or 568) * qty
         new_ml = max(0, (k.get("current_ml") or 0) - pour)
         upd = {"current_ml": new_ml}
@@ -112,21 +122,27 @@ async def decrement_kegs_for_order(order: dict):
             upd["status"] = "blown"
         await db.kegs.update_one({"_id": k["_id"]}, {"$set": upd})
         k["current_ml"] = new_ml
-        pour_docs.append({
-            "keg_id": str(k["_id"]),
-            "product_id": pid,
-            "ml": pour,
-            "qty": qty,
-            "at": now_iso,
-        })
+        pour_docs.append(
+            {
+                "keg_id": str(k["_id"]),
+                "product_id": pid,
+                "ml": pour,
+                "qty": qty,
+                "at": now_iso,
+            }
+        )
     if pour_docs:
         await db.keg_pours.insert_many(pour_docs)
+    from routers.inventory import deduct_inventory_for_order
+
+    await deduct_inventory_for_order(order)
 
 
 @router.get("/kegs/{kid}/pours")
 async def keg_pours(kid: str, days: int = 7, user: dict = Depends(get_current_user)):
     """Return per-day pour volume for the last N days (default 7)."""
     from datetime import timedelta
+
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     docs = await db.keg_pours.find({"keg_id": kid, "at": {"$gte": since}}).to_list(5000)
     by_day: dict = {}
@@ -137,7 +153,13 @@ async def keg_pours(kid: str, days: int = 7, user: dict = Depends(get_current_us
     out = []
     for i in range(days - 1, -1, -1):
         day = (datetime.now(timezone.utc) - timedelta(days=i)).date().isoformat()
-        out.append({"day": day, "ml": by_day.get(day, 0), "pints": round(by_day.get(day, 0) / 568, 1)})
+        out.append(
+            {
+                "day": day,
+                "ml": by_day.get(day, 0),
+                "pints": round(by_day.get(day, 0) / 568, 1),
+            }
+        )
     total_ml = sum(d["ml"] for d in out)
     return {"days": out, "total_ml": total_ml, "total_pints": round(total_ml / 568, 1)}
 
@@ -151,10 +173,15 @@ async def prep_bump_all(product_id: str, user: dict = Depends(get_current_user))
     for o in orders:
         lines = o.get("lines", [])
         changed = False
-        for l in lines:
-            if l.get("product_id") == product_id and l.get("fired_at") and not l.get("bumped_at") and not l.get("held"):
-                l["bumped_at"] = now_iso
-                l["bumped_by"] = user["id"]
+        for line in lines:
+            if (
+                line.get("product_id") == product_id
+                and line.get("fired_at")
+                and not line.get("bumped_at")
+                and not line.get("held")
+            ):
+                line["bumped_at"] = now_iso
+                line["bumped_by"] = user["id"]
                 bumped += 1
                 changed = True
         if changed:
@@ -173,27 +200,35 @@ async def prep_view(user: dict = Depends(get_current_user)):
     for o in orders:
         raw_name = tables.get(o.get("table_id") or "", {}).get("name")
         tname = raw_name or (o.get("order_type", "") or "").upper() or "—"
-        for l in o.get("lines", []):
-            if l.get("held") or not l.get("fired_at") or l.get("bumped_at"):
+        for line in o.get("lines", []):
+            if line.get("held") or not line.get("fired_at") or line.get("bumped_at"):
                 continue
-            key = l.get("product_id") or l["name"]
+            key = line.get("product_id") or line["name"]
             if key not in prep:
-                p = prods.get(l.get("product_id") or "")
+                p = prods.get(line.get("product_id") or "")
                 prep[key] = {
-                    "product_id": l.get("product_id"),
-                    "name": (p or {}).get("name") or l["name"],
-                    "kind": (p or {}).get("kind") or ("drink" if l.get("course") == "drink" else "food"),
-                    "course": l.get("course"),
+                    "product_id": line.get("product_id"),
+                    "name": (p or {}).get("name") or line["name"],
+                    "kind": (p or {}).get("kind")
+                    or ("drink" if line.get("course") == "drink" else "food"),
+                    "course": line.get("course"),
                     "total": 0,
                     "tables": {},
                 }
-            prep[key]["total"] += l.get("qty") or 1
-            prep[key]["tables"][tname] = prep[key]["tables"].get(tname, 0) + (l.get("qty") or 1)
+            prep[key]["total"] += line.get("qty") or 1
+            prep[key]["tables"][tname] = prep[key]["tables"].get(tname, 0) + (
+                line.get("qty") or 1
+            )
     out = []
     for v in prep.values():
-        out.append({
-            **v,
-            "tables": [{"name": k, "qty": q} for k, q in sorted(v["tables"].items(), key=lambda x: -x[1])],
-        })
+        out.append(
+            {
+                **v,
+                "tables": [
+                    {"name": k, "qty": q}
+                    for k, q in sorted(v["tables"].items(), key=lambda x: -x[1])
+                ],
+            }
+        )
     out.sort(key=lambda x: -x["total"])
     return out

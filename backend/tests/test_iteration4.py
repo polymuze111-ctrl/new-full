@@ -1,14 +1,17 @@
 """Iteration 4 tests: Public menu, PIN verify, Waitlist, Combos + engine."""
+
 import os
-import requests
+
 import pytest
+import requests
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 
 
 def _login(email, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"email": email, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"email": email, "password": password}
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -50,19 +53,25 @@ class TestPublicMenu:
 # ---------- PIN Verify ----------
 class TestPinVerify:
     def test_wrong_pin(self):
-        r = requests.post(f"{BASE_URL}/api/auth/pin-verify",
-                          json={"pin": "0000", "required_roles": ["manager", "admin"]})
+        r = requests.post(
+            f"{BASE_URL}/api/auth/pin-verify",
+            json={"pin": "0000", "required_roles": ["manager", "admin"]},
+        )
         assert r.status_code == 401
 
     def test_valid_pin_wrong_role(self):
         # server PIN 3333, but required_roles excludes server
-        r = requests.post(f"{BASE_URL}/api/auth/pin-verify",
-                          json={"pin": "3333", "required_roles": ["manager", "admin"]})
+        r = requests.post(
+            f"{BASE_URL}/api/auth/pin-verify",
+            json={"pin": "3333", "required_roles": ["manager", "admin"]},
+        )
         assert r.status_code == 403
 
     def test_manager_pin_ok(self):
-        r = requests.post(f"{BASE_URL}/api/auth/pin-verify",
-                          json={"pin": "1111", "required_roles": ["manager", "admin"]})
+        r = requests.post(
+            f"{BASE_URL}/api/auth/pin-verify",
+            json={"pin": "1111", "required_roles": ["manager", "admin"]},
+        )
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["valid"] is True
@@ -71,8 +80,10 @@ class TestPinVerify:
         assert isinstance(d["user_id"], str)
 
     def test_admin_pin_ok(self):
-        r = requests.post(f"{BASE_URL}/api/auth/pin-verify",
-                          json={"pin": "9999", "required_roles": ["manager", "admin"]})
+        r = requests.post(
+            f"{BASE_URL}/api/auth/pin-verify",
+            json={"pin": "9999", "required_roles": ["manager", "admin"]},
+        )
         assert r.status_code == 200
         assert r.json()["role"] == "admin"
 
@@ -81,8 +92,12 @@ class TestPinVerify:
 class TestWaitlist:
     def test_full_flow(self, admin_h):
         # Add
-        payload = {"name": "TEST_Alpha", "phone": "+85290000001",
-                   "party_size": 3, "quoted_wait_min": 12}
+        payload = {
+            "name": "TEST_Alpha",
+            "phone": "+85290000001",
+            "party_size": 3,
+            "quoted_wait_min": 12,
+        }
         r = requests.post(f"{BASE_URL}/api/waitlist", headers=admin_h, json=payload)
         assert r.status_code == 200, r.text
         w = r.json()
@@ -115,9 +130,16 @@ class TestWaitlist:
         assert not any(x["id"] == wid for x in lst3)
 
     def test_cancel_removes(self, admin_h):
-        r = requests.post(f"{BASE_URL}/api/waitlist", headers=admin_h,
-                          json={"name": "TEST_Bravo", "phone": "+85290000002",
-                                "party_size": 2, "quoted_wait_min": 10})
+        r = requests.post(
+            f"{BASE_URL}/api/waitlist",
+            headers=admin_h,
+            json={
+                "name": "TEST_Bravo",
+                "phone": "+85290000002",
+                "party_size": 2,
+                "quoted_wait_min": 10,
+            },
+        )
         wid = r.json()["id"]
         c = requests.delete(f"{BASE_URL}/api/waitlist/{wid}", headers=admin_h)
         assert c.status_code == 200
@@ -158,10 +180,20 @@ class TestCombos:
             "guests": 2,
             "service_charge_pct": 10.0,
             "lines": [
-                {"product_id": pA["id"], "name": pA["name"], "price": pA["price"],
-                 "qty": 1, "course": "main"},
-                {"product_id": pB["id"], "name": pB["name"], "price": pB["price"],
-                 "qty": 1, "course": "main"},
+                {
+                    "product_id": pA["id"],
+                    "name": pA["name"],
+                    "price": pA["price"],
+                    "qty": 1,
+                    "course": "main",
+                },
+                {
+                    "product_id": pB["id"],
+                    "name": pB["name"],
+                    "price": pB["price"],
+                    "qty": 1,
+                    "course": "main",
+                },
             ],
         }
         r = requests.post(f"{BASE_URL}/api/orders", headers=admin_h, json=order_body)
@@ -183,8 +215,13 @@ class TestCombos:
             "guests": 1,
             "service_charge_pct": 10.0,
             "lines": [
-                {"product_id": pA["id"], "name": pA["name"], "price": pA["price"],
-                 "qty": 1, "course": "main"},
+                {
+                    "product_id": pA["id"],
+                    "name": pA["name"],
+                    "price": pA["price"],
+                    "qty": 1,
+                    "course": "main",
+                },
             ],
         }
         r1 = requests.post(f"{BASE_URL}/api/orders", headers=admin_h, json=order_body_1)
@@ -195,8 +232,11 @@ class TestCombos:
         assert o1["combos_applied"] == []
 
         # Deactivate combo -> subsequent orders won't apply
-        up = requests.patch(f"{BASE_URL}/api/combos/{cid}", headers=admin_h,
-                            json={**cbody, "active": False})
+        up = requests.patch(
+            f"{BASE_URL}/api/combos/{cid}",
+            headers=admin_h,
+            json={**cbody, "active": False},
+        )
         assert up.status_code == 200
         r2 = requests.post(f"{BASE_URL}/api/orders", headers=admin_h, json=order_body)
         assert r2.status_code == 200

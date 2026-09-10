@@ -1,13 +1,17 @@
 """Iter 17 tests — Combo hints, Substitutes, Delivery, Preauth."""
+
 import os
+from pathlib import Path
+
 import pytest
 import requests
-from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://hk-bar-pos-pro.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get(
+    "REACT_APP_BACKEND_URL", "https://hk-bar-pos-pro.preview.emergentagent.com"
+).rstrip("/")
 # Test credentials come from env; never commit real creds to source.
 ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "polymuze111@gmail.com")
 ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
@@ -16,8 +20,10 @@ ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 @pytest.fixture(scope="module")
 def api():
     s = requests.Session()
-    r = s.post(f"{BASE_URL}/api/auth/login",
-               json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    r = s.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
     data = r.json()
     token = data.get("token") or data.get("access_token")
@@ -47,13 +53,16 @@ class TestComboHints:
             "order_type": "dine_in",
             "table_id": table["id"],
             "guests": 2,
-            "lines": [{
-                "product_id": hk_sour["id"],
-                "name": hk_sour["name"],
-                "price": hk_sour["price"],
-                "qty": 1, "course": hk_sour.get("course", "drink"),
-                "seat": 1,
-            }],
+            "lines": [
+                {
+                    "product_id": hk_sour["id"],
+                    "name": hk_sour["name"],
+                    "price": hk_sour["price"],
+                    "qty": 1,
+                    "course": hk_sour.get("course", "drink"),
+                    "seat": 1,
+                }
+            ],
             "service_charge_pct": 10.0,
         }
         cr = api.post(f"{BASE_URL}/api/orders", json=order_payload)
@@ -70,8 +79,10 @@ class TestComboHints:
             names = [h["combo_name"] for h in hints]
             assert "Cocktail Duo" in names, f"Cocktail Duo missing from {names}"
             duo = next(h for h in hints if h["combo_name"] == "Cocktail Duo")
-            assert duo["product_name"] in ("Old Fashioned", "Johnnie Walker Black"), \
-                f"unexpected trigger {duo['product_name']}"
+            assert duo["product_name"] in (
+                "Old Fashioned",
+                "Johnnie Walker Black",
+            ), f"unexpected trigger {duo['product_name']}"
             assert duo["discount"] > 0
         finally:
             api.delete(f"{BASE_URL}/api/orders/{order_id}")
@@ -80,9 +91,16 @@ class TestComboHints:
 # ---------- Substitutes ----------
 class TestSubstitutes:
     def test_substitutes_when_86d(self, api, products):
-        target = next((p for p in products if p["name"] == "Hong Kong Sour"), products[0])
+        target = next(
+            (p for p in products if p["name"] == "Hong Kong Sour"), products[0]
+        )
         pid = target["id"]
-        assert api.post(f"{BASE_URL}/api/products/{pid}/eightysix", params={"on": "true"}).status_code == 200
+        assert (
+            api.post(
+                f"{BASE_URL}/api/products/{pid}/eightysix", params={"on": "true"}
+            ).status_code
+            == 200
+        )
         try:
             r = api.get(f"{BASE_URL}/api/products/{pid}/substitutes")
             assert r.status_code == 200, r.text
@@ -109,7 +127,9 @@ class TestDelivery:
         for l in o["lines"]:
             assert l.get("fired_at"), "line must be auto-fired"
         inbox = api.get(f"{BASE_URL}/api/delivery/inbox").json()
-        assert any(x["id"] == o["id"] for x in inbox), "simulate order missing from inbox"
+        assert any(
+            x["id"] == o["id"] for x in inbox
+        ), "simulate order missing from inbox"
 
     def test_ingest_manual(self, api, products):
         food = next((p for p in products if p.get("kind") == "food"), products[0])
@@ -131,10 +151,15 @@ class TestDelivery:
 # ---------- Preauth ----------
 class TestPreauth:
     def test_preauth_basic(self, api):
-        r = api.post(f"{BASE_URL}/api/tabs/preauth", json={
-            "customer_name": "Alice", "card_last4": "4242",
-            "hold_amount": 500, "party_size": 2,
-        })
+        r = api.post(
+            f"{BASE_URL}/api/tabs/preauth",
+            json={
+                "customer_name": "Alice",
+                "card_last4": "4242",
+                "hold_amount": 500,
+                "party_size": 2,
+            },
+        )
         assert r.status_code == 200, r.text
         o = r.json()
         assert o["status"] == "open"
@@ -146,10 +171,15 @@ class TestPreauth:
         assert pa["opened_at"]
 
     def test_preauth_invalid_last4(self, api):
-        r = api.post(f"{BASE_URL}/api/tabs/preauth", json={
-            "customer_name": "Bob", "card_last4": "12",
-            "hold_amount": 100, "party_size": 1,
-        })
+        r = api.post(
+            f"{BASE_URL}/api/tabs/preauth",
+            json={
+                "customer_name": "Bob",
+                "card_last4": "12",
+                "hold_amount": 100,
+                "party_size": 1,
+            },
+        )
         assert r.status_code == 422
 
     def test_preauth_with_table(self, api, tables):
@@ -158,10 +188,16 @@ class TestPreauth:
         if not table:
             # free the first table
             table = tables[0]
-        r = api.post(f"{BASE_URL}/api/tabs/preauth", json={
-            "customer_name": "Carol", "card_last4": "9999",
-            "hold_amount": 300, "party_size": 3, "table_id": table["id"],
-        })
+        r = api.post(
+            f"{BASE_URL}/api/tabs/preauth",
+            json={
+                "customer_name": "Carol",
+                "card_last4": "9999",
+                "hold_amount": 300,
+                "party_size": 3,
+                "table_id": table["id"],
+            },
+        )
         assert r.status_code == 200, r.text
         o = r.json()
         order_id = o["id"]

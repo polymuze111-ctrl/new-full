@@ -1,4 +1,5 @@
 """Iteration 3 tests: KDS, Shifts (clock-in/out, current, list), Reservations."""
+
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -9,8 +10,9 @@ BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 
 
 def _login(email, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"email": email, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"email": email, "password": password}
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -46,10 +48,22 @@ def _make_order_with_fired_lines(h, table_id=None):
         "guests": 2,
         "table_id": table_id,
         "lines": [
-            {"product_id": food["id"], "name": food["name"], "price": food["price"],
-             "qty": 1, "course": "main", "held": False},
-            {"product_id": drink["id"], "name": drink["name"], "price": drink["price"],
-             "qty": 1, "course": "drink", "held": False},
+            {
+                "product_id": food["id"],
+                "name": food["name"],
+                "price": food["price"],
+                "qty": 1,
+                "course": "main",
+                "held": False,
+            },
+            {
+                "product_id": drink["id"],
+                "name": drink["name"],
+                "price": drink["price"],
+                "qty": 1,
+                "course": "drink",
+                "held": False,
+            },
         ],
         "service_charge_pct": 10.0,
     }
@@ -72,10 +86,22 @@ def _make_order_fired(h, table_id=None):
         "guests": 2,
         "table_id": table_id,
         "lines": [
-            {"product_id": food["id"], "name": food["name"], "price": food["price"],
-             "qty": 1, "course": "main", "held": True},
-            {"product_id": drink["id"], "name": drink["name"], "price": drink["price"],
-             "qty": 1, "course": "drink", "held": True},
+            {
+                "product_id": food["id"],
+                "name": food["name"],
+                "price": food["price"],
+                "qty": 1,
+                "course": "main",
+                "held": True,
+            },
+            {
+                "product_id": drink["id"],
+                "name": drink["name"],
+                "price": drink["price"],
+                "qty": 1,
+                "course": "drink",
+                "held": True,
+            },
         ],
         "service_charge_pct": 10.0,
     }
@@ -163,20 +189,39 @@ class TestShifts:
 
         # Create an order AS server (server_id auto-set to caller)
         food, drink = _pick_two_products(server_h)
-        r = requests.post(f"{BASE_URL}/api/orders", headers=server_h, json={
-            "order_type": "dine_in", "guests": 3,
-            "lines": [{"product_id": food["id"], "name": food["name"],
-                       "price": food["price"], "qty": 2, "course": "main"}],
-            "service_charge_pct": 10.0,
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders",
+            headers=server_h,
+            json={
+                "order_type": "dine_in",
+                "guests": 3,
+                "lines": [
+                    {
+                        "product_id": food["id"],
+                        "name": food["name"],
+                        "price": food["price"],
+                        "qty": 2,
+                        "course": "main",
+                    }
+                ],
+                "service_charge_pct": 10.0,
+            },
+        )
         assert r.status_code == 200
         o = r.json()
         assert o.get("server_id"), "server_id auto-set"
 
         # Pay it (cash, with tip)
-        pr = requests.post(f"{BASE_URL}/api/orders/{o['id']}/pay", headers=server_h, json={
-            "method": "cash", "amount": o["total"] + 10, "tip": 10, "splits": [],
-        })
+        pr = requests.post(
+            f"{BASE_URL}/api/orders/{o['id']}/pay",
+            headers=server_h,
+            json={
+                "method": "cash",
+                "amount": o["total"] + 10,
+                "tip": 10,
+                "splits": [],
+            },
+        )
         assert pr.status_code == 200
 
         cur1 = requests.get(f"{BASE_URL}/api/shifts/current", headers=server_h).json()
@@ -226,7 +271,9 @@ class TestReservations:
         # Cleanup a reserved one
         for t in tables:
             if t.get("status") == "reserved" and t.get("reservation_id"):
-                requests.delete(f"{BASE_URL}/api/reservations/{t['reservation_id']}", headers=h)
+                requests.delete(
+                    f"{BASE_URL}/api/reservations/{t['reservation_id']}", headers=h
+                )
                 return t
         return None
 
@@ -236,11 +283,18 @@ class TestReservations:
         tid = t["id"]
 
         reserved_for = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        r = requests.post(f"{BASE_URL}/api/reservations", headers=admin_h, json={
-            "table_id": tid, "guest_name": "TEST_John",
-            "phone": "12345678", "party_size": 3,
-            "reserved_for": reserved_for, "notes": "window seat"
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/reservations",
+            headers=admin_h,
+            json={
+                "table_id": tid,
+                "guest_name": "TEST_John",
+                "phone": "12345678",
+                "party_size": 3,
+                "reserved_for": reserved_for,
+                "notes": "window seat",
+            },
+        )
         assert r.status_code == 200, r.text
         res = r.json()
         rid = res["id"]
@@ -275,11 +329,17 @@ class TestReservations:
         assert t is not None
         tid = t["id"]
         reserved_for = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        r = requests.post(f"{BASE_URL}/api/reservations", headers=admin_h, json={
-            "table_id": tid, "guest_name": "TEST_Jane",
-            "phone": "99999999", "party_size": 2,
-            "reserved_for": reserved_for
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/reservations",
+            headers=admin_h,
+            json={
+                "table_id": tid,
+                "guest_name": "TEST_Jane",
+                "phone": "99999999",
+                "party_size": 2,
+                "reserved_for": reserved_for,
+            },
+        )
         assert r.status_code == 200
         rid = r.json()["id"]
 
@@ -296,25 +356,47 @@ class TestReservations:
         avail = next((t for t in tables if t.get("status") == "available"), None)
         assert avail
         food, _ = _pick_two_products(admin_h)
-        r = requests.post(f"{BASE_URL}/api/orders", headers=admin_h, json={
-            "order_type": "dine_in", "guests": 2, "table_id": avail["id"],
-            "lines": [{"product_id": food["id"], "name": food["name"],
-                       "price": food["price"], "qty": 1, "course": "main"}],
-            "service_charge_pct": 10.0,
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders",
+            headers=admin_h,
+            json={
+                "order_type": "dine_in",
+                "guests": 2,
+                "table_id": avail["id"],
+                "lines": [
+                    {
+                        "product_id": food["id"],
+                        "name": food["name"],
+                        "price": food["price"],
+                        "qty": 1,
+                        "course": "main",
+                    }
+                ],
+                "service_charge_pct": 10.0,
+            },
+        )
         assert r.status_code == 200
         oid = r.json()["id"]
 
         # now try to reserve it
         reserved_for = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        rr = requests.post(f"{BASE_URL}/api/reservations", headers=admin_h, json={
-            "table_id": avail["id"], "guest_name": "TEST_Occ",
-            "phone": "1", "party_size": 2, "reserved_for": reserved_for,
-        })
+        rr = requests.post(
+            f"{BASE_URL}/api/reservations",
+            headers=admin_h,
+            json={
+                "table_id": avail["id"],
+                "guest_name": "TEST_Occ",
+                "phone": "1",
+                "party_size": 2,
+                "reserved_for": reserved_for,
+            },
+        )
         assert rr.status_code == 400
 
         # cleanup: pay & clear
-        requests.post(f"{BASE_URL}/api/orders/{oid}/pay", headers=admin_h, json={
-            "method": "cash", "amount": 9999, "tip": 0, "splits": []
-        })
+        requests.post(
+            f"{BASE_URL}/api/orders/{oid}/pay",
+            headers=admin_h,
+            json={"method": "cash", "amount": 9999, "tip": 0, "splits": []},
+        )
         requests.post(f"{BASE_URL}/api/tables/{avail['id']}/clear", headers=admin_h)

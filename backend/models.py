@@ -1,6 +1,7 @@
 """Pydantic schemas for HK Bar POS."""
+
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -57,7 +58,9 @@ class ProductIn(BaseModel):
     happy_hour_eligible: bool = False
     description: Optional[str] = ""
     image: Optional[str] = None
-    min_tier: Optional[Literal["Bronze", "Silver", "Gold", "Platinum"]] = None  # Secret Menu gate
+    min_tier: Optional[Literal["Bronze", "Silver", "Gold", "Platinum"]] = (
+        None  # Secret Menu gate
+    )
 
 
 # -------- Floorplan --------
@@ -93,8 +96,8 @@ class MemberIn(BaseModel):
     email: Optional[EmailStr] = None
     tier: Literal["Regular", "Silver", "Gold", "VIP"] = "Regular"
     notes: Optional[str] = ""
-    birth_month: Optional[int] = None       # 1-12; used by birthday voucher auto-issue
-    referred_by: Optional[str] = None       # member_id of the referrer (loyalty)
+    birth_month: Optional[int] = None  # 1-12; used by birthday voucher auto-issue
+    referred_by: Optional[str] = None  # member_id of the referrer (loyalty)
 
 
 # -------- Happy Hour --------
@@ -146,8 +149,18 @@ class OrderUpdate(BaseModel):
 
 
 class PaymentIn(BaseModel):
-    method: Literal["cash", "card", "octopus", "wallet", "split",
-                    "fps_qr", "alipayhk", "wechatpay_hk", "payme", "unionpay"] = "cash"
+    method: Literal[
+        "cash",
+        "card",
+        "octopus",
+        "wallet",
+        "split",
+        "fps_qr",
+        "alipayhk",
+        "wechatpay_hk",
+        "payme",
+        "unionpay",
+    ] = "cash"
     amount: float
     tip: float = 0.0
     splits: List[dict] = []  # [{method, amount}]
@@ -191,9 +204,10 @@ class ComboSlot(BaseModel):
 
 class ComboSchedule(BaseModel):
     """Optional Deal-of-the-Night window. If unset the combo is always active."""
+
     days: List[int] = []  # 0=Mon .. 6=Sun; empty => any day
     start_time: Optional[str] = None  # "HH:MM" HK time
-    end_time: Optional[str] = None    # supports cross-midnight windows
+    end_time: Optional[str] = None  # supports cross-midnight windows
 
 
 class ComboIn(BaseModel):
@@ -208,15 +222,24 @@ class ComboIn(BaseModel):
 
 # -------- Manager-only ops --------
 class AutoCloseIn(BaseModel):
-    method: Literal["cash", "card", "octopus", "wallet",
-                    "fps_qr", "alipayhk", "wechatpay_hk", "payme", "unionpay"] = "card"
+    method: Literal[
+        "cash",
+        "card",
+        "octopus",
+        "wallet",
+        "fps_qr",
+        "alipayhk",
+        "wechatpay_hk",
+        "payme",
+        "unionpay",
+    ] = "card"
     note: Optional[str] = "Auto-closed at last call"
 
 
 class MoveLineIn(BaseModel):
     line_index: int
     target_order_id: Optional[str] = None  # None => same order, just reseat
-    target_seat: Optional[int] = None      # None => keep current seat
+    target_seat: Optional[int] = None  # None => keep current seat
 
 
 class MergeOrdersIn(BaseModel):
@@ -266,13 +289,17 @@ class FeedbackIn(BaseModel):
 
 
 class SocialShareIn(BaseModel):
-    platform: Literal["instagram", "facebook", "tiktok", "wechat", "whatsapp", "x"] = "instagram"
+    platform: Literal["instagram", "facebook", "tiktok", "wechat", "whatsapp", "x"] = (
+        "instagram"
+    )
     url: Optional[str] = None
 
 
 class PushSegmentIn(BaseModel):
     """Loyalty push composer — target a member segment and blast a voucher.
-    channel is MOCKED (no real SMS/WhatsApp send; we log the intent + issue the voucher)."""
+    channel is MOCKED (no real SMS/WhatsApp send; we log the intent + issue the voucher).
+    """
+
     tier: Optional[Literal["Bronze", "Silver", "Gold", "Platinum"]] = None
     days_inactive: Optional[int] = None  # e.g. 14 = haven't visited in 14+ days
     min_lifetime_spend: Optional[float] = None
@@ -283,10 +310,62 @@ class PushSegmentIn(BaseModel):
     channel: Literal["sms", "whatsapp", "email"] = "whatsapp"
 
 
+# -------- Inventory --------
+class UnitIn(BaseModel):
+    """Measurement unit. factor_to_base converts a qty in this unit into the
+    base unit of its kind (ml for volume, g for mass, unit for count)."""
+
+    name: str
+    symbol: str
+    kind: Literal["volume", "mass", "count"] = "count"
+    factor_to_base: float = 1.0
+    active: bool = True
+
+
+class InventoryItemIn(BaseModel):
+    name: str
+    sku: Optional[str] = ""
+    category: str = "General"
+    purchase_unit_id: Optional[str] = None  # how we buy it (bottle, kg, crate)
+    usage_unit_id: Optional[str] = None  # how we track/consume it (ml, g, unit)
+    cost_per_purchase_unit: float = 0.0  # HKD
+    opening_stock: float = 0.0  # in usage units (only used on create)
+    par_level: float = 0.0  # desired stock, in usage units
+    reorder_level: float = 0.0  # low-stock alert threshold, usage units
+    supplier: Optional[str] = ""
+    notes: Optional[str] = ""
+
+
+class StockAdjustIn(BaseModel):
+    qty: float = 0.0  # signed, in usage units (restock +, waste/breakage -)
+    reason: Literal["restock", "waste", "breakage", "stocktake", "correction"]
+    note: Optional[str] = ""
+    new_stock: Optional[float] = None  # stocktake only: absolute counted stock
+
+
+class RecipeLineIn(BaseModel):
+    item_id: str
+    qty: float
+    unit_id: Optional[str] = None  # defaults to the item's usage unit
+
+
+class RecipeIn(BaseModel):
+    """Per-product depletion rule. `lines` = ingredient list; `direct_item_id`
+    = sell-as-is product (deduct 1 usage unit per sold qty). variant_multipliers
+    auto-scale the whole recipe per variant name (e.g. {"Double": 2.0})."""
+
+    product_id: str
+    lines: List[RecipeLineIn] = []
+    direct_item_id: Optional[str] = None
+    variant_multipliers: dict = {}
+    active: bool = True
+
+
 class UpsellNudgeIn(BaseModel):
     """A combo-heat-map hint event — shown when the badge renders, accepted
     when the server taps it, dismissed when the underlying combo fires without
     this hint being used."""
+
     order_id: Optional[str] = None
     table_id: Optional[str] = None
     combo_name: str

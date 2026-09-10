@@ -1,4 +1,5 @@
 """Iteration 2 tests: Happy hour active/patch, category patch, split payment."""
+
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,8 +13,10 @@ HK = ZoneInfo("Asia/Hong_Kong")
 
 @pytest.fixture(scope="session")
 def admin_token():
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"email": "polymuze111@gmail.com", "password": "admin123"})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": "polymuze111@gmail.com", "password": "admin123"},
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"]
 
@@ -38,21 +41,35 @@ class TestHappyHourActive:
         active = requests.get(f"{BASE_URL}/api/happy-hours/active", headers=h).json()
         wd = active["weekday"]
         # Create a rule for TODAY spanning full-day
-        r_in = requests.post(f"{BASE_URL}/api/happy-hours", headers=h, json={
-            "name": "TEST_HH_TODAY", "days": [wd],
-            "start_time": "00:00", "end_time": "23:59",
-            "percent_off": 15.0, "category_ids": [],
-        })
+        r_in = requests.post(
+            f"{BASE_URL}/api/happy-hours",
+            headers=h,
+            json={
+                "name": "TEST_HH_TODAY",
+                "days": [wd],
+                "start_time": "00:00",
+                "end_time": "23:59",
+                "percent_off": 15.0,
+                "category_ids": [],
+            },
+        )
         assert r_in.status_code == 200
         in_id = r_in.json()["id"]
 
         # Create a rule for a NON-today weekday
         other_wd = (wd + 3) % 7
-        r_out = requests.post(f"{BASE_URL}/api/happy-hours", headers=h, json={
-            "name": "TEST_HH_OTHER", "days": [other_wd],
-            "start_time": "00:00", "end_time": "23:59",
-            "percent_off": 15.0, "category_ids": [],
-        })
+        r_out = requests.post(
+            f"{BASE_URL}/api/happy-hours",
+            headers=h,
+            json={
+                "name": "TEST_HH_OTHER",
+                "days": [other_wd],
+                "start_time": "00:00",
+                "end_time": "23:59",
+                "percent_off": 15.0,
+                "category_ids": [],
+            },
+        )
         assert r_out.status_code == 200
         out_id = r_out.json()["id"]
 
@@ -65,11 +82,18 @@ class TestHappyHourActive:
         cur_str = now_hk.strftime("%H:%M")
         if cur_str <= "00:01":
             past_start, past_end = "23:58", "23:59"
-        r_time = requests.post(f"{BASE_URL}/api/happy-hours", headers=h, json={
-            "name": "TEST_HH_TIMEOUT", "days": [wd],
-            "start_time": past_start, "end_time": past_end,
-            "percent_off": 15.0, "category_ids": [],
-        })
+        r_time = requests.post(
+            f"{BASE_URL}/api/happy-hours",
+            headers=h,
+            json={
+                "name": "TEST_HH_TIMEOUT",
+                "days": [wd],
+                "start_time": past_start,
+                "end_time": past_end,
+                "percent_off": 15.0,
+                "category_ids": [],
+            },
+        )
         assert r_time.status_code == 200
         time_id = r_time.json()["id"]
 
@@ -89,11 +113,18 @@ class TestHappyHourActive:
         wd = active["weekday"]
         now_hk = datetime.now(HK)
         cur = now_hk.strftime("%H:%M")
-        r = requests.post(f"{BASE_URL}/api/happy-hours", headers=h, json={
-            "name": "TEST_HH_XMID", "days": [wd],
-            "start_time": "22:00", "end_time": "02:00",
-            "percent_off": 20.0, "category_ids": [],
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/happy-hours",
+            headers=h,
+            json={
+                "name": "TEST_HH_XMID",
+                "days": [wd],
+                "start_time": "22:00",
+                "end_time": "02:00",
+                "percent_off": 20.0,
+                "category_ids": [],
+            },
+        )
         assert r.status_code == 200
         hid = r.json()["id"]
         active2 = requests.get(f"{BASE_URL}/api/happy-hours/active", headers=h).json()
@@ -109,18 +140,32 @@ class TestHappyHourActive:
 # -------- PATCH endpoints --------
 class TestPatchEndpoints:
     def test_patch_happy_hour(self, h):
-        r = requests.post(f"{BASE_URL}/api/happy-hours", headers=h, json={
-            "name": "TEST_HH_PATCH", "days": [0],
-            "start_time": "10:00", "end_time": "12:00",
-            "percent_off": 10.0, "category_ids": [],
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/happy-hours",
+            headers=h,
+            json={
+                "name": "TEST_HH_PATCH",
+                "days": [0],
+                "start_time": "10:00",
+                "end_time": "12:00",
+                "percent_off": 10.0,
+                "category_ids": [],
+            },
+        )
         assert r.status_code == 200
         hid = r.json()["id"]
-        pr = requests.patch(f"{BASE_URL}/api/happy-hours/{hid}", headers=h, json={
-            "name": "TEST_HH_PATCHED", "days": [0, 1],
-            "start_time": "11:00", "end_time": "13:00",
-            "percent_off": 25.0, "category_ids": [],
-        })
+        pr = requests.patch(
+            f"{BASE_URL}/api/happy-hours/{hid}",
+            headers=h,
+            json={
+                "name": "TEST_HH_PATCHED",
+                "days": [0, 1],
+                "start_time": "11:00",
+                "end_time": "13:00",
+                "percent_off": 25.0,
+                "category_ids": [],
+            },
+        )
         assert pr.status_code == 200
         d = pr.json()
         assert d["name"] == "TEST_HH_PATCHED"
@@ -129,14 +174,24 @@ class TestPatchEndpoints:
         requests.delete(f"{BASE_URL}/api/happy-hours/{hid}", headers=h)
 
     def test_patch_category(self, h):
-        r = requests.post(f"{BASE_URL}/api/categories", headers=h, json={
-            "name": "TEST_CAT", "color": "#111111",
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/categories",
+            headers=h,
+            json={
+                "name": "TEST_CAT",
+                "color": "#111111",
+            },
+        )
         assert r.status_code == 200
         cid = r.json()["id"]
-        pr = requests.patch(f"{BASE_URL}/api/categories/{cid}", headers=h, json={
-            "name": "TEST_CAT_UPDATED", "color": "#222222",
-        })
+        pr = requests.patch(
+            f"{BASE_URL}/api/categories/{cid}",
+            headers=h,
+            json={
+                "name": "TEST_CAT_UPDATED",
+                "color": "#222222",
+            },
+        )
         assert pr.status_code == 200
         d = pr.json()
         assert d["name"] == "TEST_CAT_UPDATED"
@@ -150,22 +205,40 @@ class TestSplitPayment:
         # pick any product
         prods = requests.get(f"{BASE_URL}/api/products", headers=headers).json()
         p = prods[0]
-        r = requests.post(f"{BASE_URL}/api/orders", headers=headers, json={
-            "order_type": "dine_in", "guests": 2,
-            "lines": [{"product_id": p["id"], "name": p["name"],
-                       "price": p["price"], "qty": 2, "course": "main"}],
-            "service_charge_pct": 10.0,
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders",
+            headers=headers,
+            json={
+                "order_type": "dine_in",
+                "guests": 2,
+                "lines": [
+                    {
+                        "product_id": p["id"],
+                        "name": p["name"],
+                        "price": p["price"],
+                        "qty": 2,
+                        "course": "main",
+                    }
+                ],
+                "service_charge_pct": 10.0,
+            },
+        )
         assert r.status_code == 200
         return r.json()
 
     def test_split_insufficient_returns_400(self, h):
         o = self._make_order(h)
         total = o["total"]
-        r = requests.post(f"{BASE_URL}/api/orders/{o['id']}/pay", headers=h, json={
-            "method": "split", "amount": 0, "tip": 0,
-            "splits": [{"method": "cash", "amount": round(total / 3, 2)}],
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders/{o['id']}/pay",
+            headers=h,
+            json={
+                "method": "split",
+                "amount": 0,
+                "tip": 0,
+                "splits": [{"method": "cash", "amount": round(total / 3, 2)}],
+            },
+        )
         assert r.status_code == 400
         assert "Split total" in r.text
 
@@ -173,13 +246,19 @@ class TestSplitPayment:
         o = self._make_order(h)
         total = o["total"]
         half = round(total / 2, 2)
-        r = requests.post(f"{BASE_URL}/api/orders/{o['id']}/pay", headers=h, json={
-            "method": "split", "amount": 0, "tip": 0,
-            "splits": [
-                {"method": "cash", "amount": half},
-                {"method": "card", "amount": total - half},
-            ],
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders/{o['id']}/pay",
+            headers=h,
+            json={
+                "method": "split",
+                "amount": 0,
+                "tip": 0,
+                "splits": [
+                    {"method": "cash", "amount": half},
+                    {"method": "card", "amount": total - half},
+                ],
+            },
+        )
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["status"] == "paid"
@@ -191,10 +270,16 @@ class TestSplitPayment:
     def test_split_overpay_change(self, h):
         o = self._make_order(h)
         total = o["total"]
-        r = requests.post(f"{BASE_URL}/api/orders/{o['id']}/pay", headers=h, json={
-            "method": "split", "amount": 0, "tip": 0,
-            "splits": [{"method": "cash", "amount": total + 20}],
-        })
+        r = requests.post(
+            f"{BASE_URL}/api/orders/{o['id']}/pay",
+            headers=h,
+            json={
+                "method": "split",
+                "amount": 0,
+                "tip": 0,
+                "splits": [{"method": "cash", "amount": total + 20}],
+            },
+        )
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["payment"]["method"] == "split"

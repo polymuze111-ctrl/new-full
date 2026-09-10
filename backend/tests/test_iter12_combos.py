@@ -7,7 +7,9 @@ Covers:
 - AND-slot semantics (each product qty>=1 and <=max).
 - Multi-slot combo end-to-end via /orders create + patch.
 """
+
 import os
+
 import pytest
 import requests
 
@@ -69,17 +71,26 @@ def _cleanup(client):
 
 def _line(p, qty=1):
     return {
-        "product_id": p["id"], "name": p["name"], "price": p["price"],
-        "qty": qty, "modifiers": [], "course": p.get("course", "main"),
-        "held": False, "notes": "",
+        "product_id": p["id"],
+        "name": p["name"],
+        "price": p["price"],
+        "qty": qty,
+        "modifiers": [],
+        "course": p.get("course", "main"),
+        "held": False,
+        "notes": "",
     }
 
 
 def _make_order_payload(lines):
     return {
-        "order_type": "pick_up", "guests": 1, "lines": lines,
-        "discount_type": "none", "discount_value": 0,
-        "service_charge_pct": 10, "notes": "",
+        "order_type": "pick_up",
+        "guests": 1,
+        "lines": lines,
+        "discount_type": "none",
+        "discount_value": 0,
+        "service_charge_pct": 10,
+        "notes": "",
     }
 
 
@@ -122,10 +133,22 @@ def test_advanced_slot_combo_persists(client, pids):
         "name": TEST_COMBO_PREFIX + "adv",
         "product_ids": [],
         "slots": [
-            {"operator": "or", "min_qty": 1, "max_qty": 1,
-             "product_ids": [pids["drinkA"]["id"], pids["drinkB"]["id"], pids["drinkC"]["id"]]},
-            {"operator": "and", "min_qty": 1, "max_qty": 2,
-             "product_ids": [pids["foodA"]["id"], pids["foodB"]["id"]]},
+            {
+                "operator": "or",
+                "min_qty": 1,
+                "max_qty": 1,
+                "product_ids": [
+                    pids["drinkA"]["id"],
+                    pids["drinkB"]["id"],
+                    pids["drinkC"]["id"],
+                ],
+            },
+            {
+                "operator": "and",
+                "min_qty": 1,
+                "max_qty": 2,
+                "product_ids": [pids["foodA"]["id"], pids["foodB"]["id"]],
+            },
         ],
         "discount_type": "percent",
         "discount_value": 15,
@@ -154,9 +177,17 @@ def test_or_slot_semantics(client, pids):
     combo = {
         "name": TEST_COMBO_PREFIX + "or",
         "product_ids": [],
-        "slots": [{"operator": "or", "min_qty": 1, "max_qty": 1,
-                   "product_ids": [A["id"], B["id"]]}],
-        "discount_type": "cash", "discount_value": 10, "active": True,
+        "slots": [
+            {
+                "operator": "or",
+                "min_qty": 1,
+                "max_qty": 1,
+                "product_ids": [A["id"], B["id"]],
+            }
+        ],
+        "discount_type": "cash",
+        "discount_value": 10,
+        "active": True,
     }
     r = client.post(f"{API}/combos", json=combo)
     assert r.status_code == 200
@@ -167,10 +198,14 @@ def test_or_slot_semantics(client, pids):
         return any(c["name"] == combo["name"] for c in rr.json()["combos_applied"])
 
     assert _combo_applied([_line(A, 1)]) is True, "1xA within [1,1] should match"
-    assert _combo_applied([_line(A, 1), _line(B, 1)]) is False, "total=2 > max=1 should NOT match"
+    assert (
+        _combo_applied([_line(A, 1), _line(B, 1)]) is False
+    ), "total=2 > max=1 should NOT match"
     assert _combo_applied([_line(A, 2)]) is False, "2xA > max=1 should NOT match"
     # empty-of-slot order with only unrelated foods
-    assert _combo_applied([_line(pids["foodC"], 1)]) is False, "0 of both should NOT match"
+    assert (
+        _combo_applied([_line(pids["foodC"], 1)]) is False
+    ), "0 of both should NOT match"
 
 
 # ---------- AND-slot semantics ----------
@@ -179,9 +214,17 @@ def test_and_slot_semantics(client, pids):
     combo = {
         "name": TEST_COMBO_PREFIX + "and",
         "product_ids": [],
-        "slots": [{"operator": "and", "min_qty": 1, "max_qty": 2,
-                   "product_ids": [A["id"], B["id"], C["id"]]}],
-        "discount_type": "cash", "discount_value": 5, "active": True,
+        "slots": [
+            {
+                "operator": "and",
+                "min_qty": 1,
+                "max_qty": 2,
+                "product_ids": [A["id"], B["id"], C["id"]],
+            }
+        ],
+        "discount_type": "cash",
+        "discount_value": 5,
+        "active": True,
     }
     r = client.post(f"{API}/combos", json=combo)
     assert r.status_code == 200
@@ -193,8 +236,12 @@ def test_and_slot_semantics(client, pids):
 
     assert _applied([_line(A), _line(B), _line(C)]) is True
     assert _applied([_line(A), _line(B)]) is False, "missing C should NOT match"
-    assert _applied([_line(A, 3), _line(B), _line(C)]) is False, "qty=3 > max=2 should NOT match"
-    assert _applied([_line(A, 2), _line(B, 2), _line(C, 2)]) is True, "each at max=2 should match"
+    assert (
+        _applied([_line(A, 3), _line(B), _line(C)]) is False
+    ), "qty=3 > max=2 should NOT match"
+    assert (
+        _applied([_line(A, 2), _line(B, 2), _line(C, 2)]) is True
+    ), "each at max=2 should match"
 
 
 # ---------- Multi-slot end-to-end via create + patch ----------
@@ -206,12 +253,26 @@ def test_multi_slot_create_and_patch(client, pids):
         "name": TEST_COMBO_PREFIX + "multi",
         "product_ids": [],
         "slots": [
-            {"operator": "or", "min_qty": 1, "max_qty": 1,
-             "product_ids": [drink["id"], pids["drinkB"]["id"], pids["drinkC"]["id"]]},
-            {"operator": "and", "min_qty": 1, "max_qty": 2,
-             "product_ids": [f1["id"], f2["id"]]},
+            {
+                "operator": "or",
+                "min_qty": 1,
+                "max_qty": 1,
+                "product_ids": [
+                    drink["id"],
+                    pids["drinkB"]["id"],
+                    pids["drinkC"]["id"],
+                ],
+            },
+            {
+                "operator": "and",
+                "min_qty": 1,
+                "max_qty": 2,
+                "product_ids": [f1["id"], f2["id"]],
+            },
         ],
-        "discount_type": "percent", "discount_value": 20, "active": True,
+        "discount_type": "percent",
+        "discount_value": 20,
+        "active": True,
     }
     r = client.post(f"{API}/combos", json=combo)
     assert r.status_code == 200

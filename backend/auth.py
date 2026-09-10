@@ -1,12 +1,12 @@
 """Auth utilities: password hashing, JWT tokens, current user dep."""
+
 import os
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
 from bson import ObjectId
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request
 
 JWT_ALGO = "HS256"
 
@@ -75,6 +75,7 @@ def make_current_user_dep(get_db):
         if not token:
             raise HTTPException(status_code=401, detail="Not authenticated")
         return await _fetch_user(get_db(), token)
+
     return current_user
 
 
@@ -83,4 +84,5 @@ def require_role(*allowed: str):
         if user.get("role") not in allowed and user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Insufficient permission")
         return user
+
     return _wrap
